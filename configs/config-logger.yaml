@@ -1,0 +1,8 @@
+level: INFO
+
+console:
+  format: "%(name)s > %(step)s: %(message)s"
+
+file:
+  path: logs/pipeline.log
+  format: "%(asctime)s | %(levelname)s | %(name)s > %(step)s: %(message)s"

@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.venv/
+
+# Generated data and logs
+data/
+logs/
+/*.xlsx
+
+# Local reference material
+docs/
+*.zip
+__MACOSX/

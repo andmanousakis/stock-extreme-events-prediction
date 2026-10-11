@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools==80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stock-extreme"
+version = "0.1.0"
+description = "Predict extreme daily moves in Apple stock with a random forest and a temporal CNN."
+requires-python = ">=3.11"
+dependencies = [
+    "matplotlib==3.11.2",
+    "numpy==2.4.6",
+    "openpyxl==3.1.5",
+    "pandas==3.0.6",
+    "pyyaml==6.0.3",
+    "rich==15.0.0",
+    "scikit-learn==1.9.1",
+    "torch==2.14.1",
+    "yfinance==1.7.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.1.1",
+]
+
+[tool.setuptools]
+packages = ["utils"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+markers = ["integration: calls real external services such as Yahoo Finance"]
