@@ -92,3 +92,38 @@ jobs:
       # Run the integration tests inside the exact image CD published.
       - name: Run integration tests
         run: docker run --rm ${{ env.IMAGE }}:${{ github.sha }} python -m pytest -v -p no:cacheprovider -m integration
+
+  # Data retrieval: run the pipeline in the published image and keep the data as a GitHub release.
+  retrieve:
+    needs: integration
+    runs-on: ubuntu-24.04
+    # Allow creating releases and pulling the image.
+    permissions:
+      contents: write
+      packages: read
+    steps:
+      # Log in to GitHub Container Registry.
+      - name: Log in to GHCR
+        uses: docker/login-action@v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Run data retrieval, writing data/ and logs/ to the runner through mounted folders.
+      - name: Run data retrieval
+        run: |
+          mkdir -p data logs
+          docker run --rm -u $(id -u):$(id -g) -v "$PWD/data":/app/data -v "$PWD/logs":/app/logs ${{ env.IMAGE }}:${{ github.sha }} python -m src.1_data_retrieval
+
+      # Publish the raw data and log as a release tagged data-<date>-<short sha>.
+      - name: Create data release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="data-$(date -u +%Y-%m-%d)-${GITHUB_SHA::7}"
+          gh release create "$TAG" data/raw/apple_stock_raw.xlsx logs/pipeline.log \
+            --repo "${{ github.repository }}" \
+            --target "${{ github.sha }}" \
+            --title "Raw data $TAG" \
+            --notes "Raw AAPL prices retrieved by commit ${{ github.sha }}."
