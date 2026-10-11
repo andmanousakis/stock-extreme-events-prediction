@@ -13,5 +13,5 @@ services:
     volumes:
       # Share the project folder so code changes and outputs sync with your machine.
       - ..:/app
-    # Run the unit tests, then the pipeline only if they pass (no .pytest_cache in the project).
-    command: sh -c "python -m pytest -v -p no:cacheprovider && python -m src.1_data_retrieval"
+    # Run the unit tests (integration tests run in CI), then the pipeline only if they pass (no .pytest_cache in the project).
+    command: sh -c "python -m pytest -v -p no:cacheprovider -m 'not integration' && python -m src.1_data_retrieval"

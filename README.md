@@ -43,4 +43,4 @@ make stock-extreme-dev-clean-docker
 make stock-extreme-dev-wipe-docker
 ```
 
-Data retrieval only runs if all unit and integration tests pass. The integration tests call Yahoo Finance, so they need internet access. Raw data is saved to `data/raw/apple_stock_raw.xlsx` and logs to `logs/pipeline.log`.
+Starting the container runs the unit tests, then data retrieval only if they all pass. On GitHub, CI runs the unit tests on every push; pushes to `dev` then publish the image (CD) and run the integration tests, which call Yahoo Finance, against it. Raw data is saved to `data/raw/apple_stock_raw.xlsx` and logs to `logs/pipeline.log`.

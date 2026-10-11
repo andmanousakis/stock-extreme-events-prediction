@@ -1,0 +1,94 @@
+name: CI/CD
+
+# Run on every push and on pull requests.
+on:
+  push:
+  pull_request:
+
+# Allow jobs to read the code and push/pull images on GitHub Container Registry.
+permissions:
+  contents: read
+  packages: write
+
+env:
+  # Registry image name.
+  IMAGE: ghcr.io/andmanousakis/stock-extreme
+
+jobs:
+  # CI: build the image and run the unit tests. Runs on every push and pull request.
+  ci:
+    runs-on: ubuntu-24.04
+    steps:
+      # Get the repository code.
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Set up Docker Buildx so image layers can be cached between jobs and runs.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Build the dev image and load it into Docker, reusing cached layers.
+      - name: Build stock-extreme:dev image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.dev
+          tags: stock-extreme:dev
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Run the unit tests inside the image.
+      - name: Run unit tests
+        run: docker run --rm stock-extreme:dev python -m pytest -v -p no:cacheprovider -m "not integration"
+
+  # CD: publish the image to GitHub Container Registry. Only for pushes to dev, after CI passes.
+  cd:
+    needs: ci
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-24.04
+    steps:
+      # Get the repository code.
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Set up Docker Buildx to reuse the layers cached by the CI job.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Log in to GitHub Container Registry.
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Push the image as :dev (latest dev) and :<commit sha> (exact version).
+      - name: Push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.dev
+          tags: |
+            ${{ env.IMAGE }}:dev
+            ${{ env.IMAGE }}:${{ github.sha }}
+          push: true
+          cache-from: type=gha
+
+  # Integration tests: pull the published image and run the integration tests against real services.
+  integration:
+    needs: cd
+    runs-on: ubuntu-24.04
+    steps:
+      # Log in to GitHub Container Registry.
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Run the integration tests inside the exact image CD published.
+      - name: Run integration tests
+        run: docker run --rm ${{ env.IMAGE }}:${{ github.sha }} python -m pytest -v -p no:cacheprovider -m integration
