@@ -172,17 +172,23 @@ class TestMakeRequest:
         # Make every download return no rows.
         counter = fake_download(monkeypatch, failures = 99, empty = True)
 
+        # Create the data retrieval object.
+        retrieval = data_retrieval.DataRetrieval()
+
+        # Get the retry configs.
+        request = retrieval.request
+
         # Check the step stops the pipeline.
         with pytest.raises(SystemExit):
 
             # Request data.
-            data_retrieval.DataRetrieval().make_request(symbol = "AAPL", start = "2015-01-01", end = "2015-01-06")
+            retrieval.make_request(symbol = "AAPL", start = "2015-01-01", end = "2015-01-06")
 
         # Check it tried max_retries times.
-        assert counter["calls"] == 5
+        assert counter["calls"] == request["max_retries"]
 
-        # Check the delays doubled and there was no wait after the last attempt.
-        assert sleeps == [2, 4, 8, 16]
+        # Check the delays doubled, capped at max_delay, with no wait after the last attempt.
+        assert sleeps == [min(request["base_delay"] * 2 ** i, request["max_delay"]) for i in range(request["max_retries"] - 1)]
 
 class TestApplySchema:
     """

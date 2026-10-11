@@ -1,21 +1,26 @@
+import os
 from pathlib import Path
 import yaml
 
 class ConfigLoader:
     """
-    Load YAML config files from the project's configs directory.
+    Load YAML config files for the current environment (dev, uat or prod) from the project's configs directory.
     """
 
-    def __init__(self, config_dir: str = None):
+    def __init__(self, config_dir: str = None, env: str = None):
         """
-        Set the directory that config files are read from.
+        Set the environment and the directory that config files are read from.
 
         Args:
-            config_dir (str): Path to the configs directory. Defaults to <project_root>/configs.
+            config_dir (str): Path to the configs directory. Defaults to <project_root>/configs/<env>.
+            env (str): Environment name. Defaults to the APP_ENV environment variable, or dev if it is not set.
         """
 
-        # Default to the configs directory at the project root.
-        self.config_dir = Path(config_dir) if config_dir else Path(__file__).resolve().parents[1] / "configs"
+        # Use the given environment, then APP_ENV, then dev.
+        self.env = env or os.environ.get("APP_ENV", "dev")
+
+        # Default to the environment's folder in the configs directory at the project root.
+        self.config_dir = Path(config_dir) if config_dir else Path(__file__).resolve().parents[1] / "configs" / self.env
 
     def load(self, name: str = None) -> dict:
         """

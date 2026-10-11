@@ -1,0 +1,11 @@
+request:
+  symbol: AAPL
+  start: "2023-01-01"
+  end: "2024-01-01"
+  max_retries: 3
+  base_delay: 2
+  max_delay: 30
+  schema: raw_stock
+
+output:
+  raw_data: data/raw/apple_stock_raw.xlsx
