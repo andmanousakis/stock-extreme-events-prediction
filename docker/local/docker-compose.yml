@@ -6,12 +6,15 @@ services:
     container_name: stock-extreme-dev
     build:
       # Build from the project root.
-      context: ..
-      dockerfile: docker/Dockerfile.dev
+      context: ../..
+      dockerfile: docker/local/Dockerfile
     # Run as your user so written files aren't owned by root (set by the makefile).
     user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    environment:
+      # Load configs from configs/dev.
+      APP_ENV: dev
     volumes:
       # Share the project folder so code changes and outputs sync with your machine.
-      - ..:/app
-    # Run the unit tests (integration tests run in CI), then the pipeline only if they pass (no .pytest_cache in the project).
-    command: sh -c "python -m pytest -v -p no:cacheprovider -m 'not integration' && python -m src.1_data_retrieval"
+      - ../..:/app
+    # Run the unit and integration tests, then the pipeline only if they pass (no .pytest_cache in the project).
+    command: sh -c "python -m pytest -v -p no:cacheprovider && python -m src.1_data_retrieval"

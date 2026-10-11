@@ -1,4 +1,4 @@
-COMPOSE := docker compose -f docker/docker-compose.dev.yml
+COMPOSE := docker compose -f docker/local/docker-compose.yml
 
 export HOST_UID := $(shell id -u)
 export HOST_GID := $(shell id -g)

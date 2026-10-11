@@ -13,6 +13,8 @@ permissions:
 env:
   # Registry image name.
   IMAGE: ghcr.io/andmanousakis/stock-extreme
+  # Target environment from the branch: prod and uat branches map to themselves, every other branch to dev.
+  APP_ENV: ${{ github.ref_name == 'prod' && 'prod' || github.ref_name == 'uat' && 'uat' || 'dev' }}
 
 jobs:
   # CI: build the image and run the unit tests. Runs on every push and pull request.
@@ -27,25 +29,25 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4.4.1
 
-      # Build the dev image and load it into Docker, reusing cached layers.
-      - name: Build stock-extreme:dev image
+      # Build the image and load it into Docker, caching layers for the cd job.
+      - name: Build image
         uses: docker/build-push-action@v7.4.0
         with:
           context: .
-          file: docker/Dockerfile.dev
-          tags: stock-extreme:dev
+          file: docker/deploy/Dockerfile
+          tags: stock-extreme:${{ github.sha }}
           load: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # Run the unit tests inside the image.
+      # Run the unit tests inside the image with the target environment's configs.
       - name: Run unit tests
-        run: docker run --rm stock-extreme:dev python -m pytest -v -p no:cacheprovider -m "not integration"
+        run: docker run --rm -e APP_ENV=${{ env.APP_ENV }} stock-extreme:${{ github.sha }} python -m pytest -v -p no:cacheprovider -m "not integration"
 
-  # CD: publish the image to GitHub Container Registry. Only for pushes to dev, after CI passes.
+  # CD: publish the image to GitHub Container Registry. Only for pushes, after CI passes.
   cd:
     needs: ci
-    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+    if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     steps:
       # Get the repository code.
@@ -64,14 +66,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Push the image as :dev (latest dev) and :<commit sha> (exact version).
+      # Push the image as :<environment> (latest for dev, uat or prod) and :<commit sha> (exact version).
       - name: Push image
         uses: docker/build-push-action@v7.4.0
         with:
           context: .
-          file: docker/Dockerfile.dev
+          file: docker/deploy/Dockerfile
           tags: |
-            ${{ env.IMAGE }}:dev
+            ${{ env.IMAGE }}:${{ env.APP_ENV }}
             ${{ env.IMAGE }}:${{ github.sha }}
           push: true
           cache-from: type=gha
@@ -89,9 +91,9 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Run the integration tests inside the exact image CD published.
+      # Run the integration tests inside the exact image CD published, with the target environment's configs.
       - name: Run integration tests
-        run: docker run --rm ${{ env.IMAGE }}:${{ github.sha }} python -m pytest -v -p no:cacheprovider -m integration
+        run: docker run --rm -e APP_ENV=${{ env.APP_ENV }} ${{ env.IMAGE }}:${{ github.sha }} python -m pytest -v -p no:cacheprovider -m integration
 
   # Data retrieval: run the pipeline in the published image and keep the data as a GitHub release.
   retrieve:
@@ -110,20 +112,20 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Run data retrieval, writing data/ and logs/ to the runner through mounted folders.
+      # Run data retrieval with the target environment's configs, writing data/ and logs/ to the runner through mounted folders.
       - name: Run data retrieval
         run: |
           mkdir -p data logs
-          docker run --rm -u $(id -u):$(id -g) -v "$PWD/data":/app/data -v "$PWD/logs":/app/logs ${{ env.IMAGE }}:${{ github.sha }} python -m src.1_data_retrieval
+          docker run --rm -e APP_ENV=${{ env.APP_ENV }} -u $(id -u):$(id -g) -v "$PWD/data":/app/data -v "$PWD/logs":/app/logs ${{ env.IMAGE }}:${{ github.sha }} python -m src.1_data_retrieval
 
-      # Publish the raw data and log as a release tagged data-<date>-<short sha>.
+      # Publish the raw data and log as a release tagged data-<environment>-<date>-<short sha>.
       - name: Create data release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="data-$(date -u +%Y-%m-%d)-${GITHUB_SHA::7}"
+          TAG="data-${APP_ENV}-$(date -u +%Y-%m-%d)-${GITHUB_SHA::7}"
           gh release create "$TAG" data/raw/apple_stock_raw.xlsx logs/pipeline.log \
             --repo "${{ github.repository }}" \
             --target "${{ github.sha }}" \
             --title "Raw data $TAG" \
-            --notes "Raw AAPL prices retrieved by commit ${{ github.sha }}."
+            --notes "Raw AAPL prices for ${APP_ENV}, retrieved by commit ${{ github.sha }} on branch ${{ github.ref_name }}."
