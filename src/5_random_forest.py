@@ -2,7 +2,7 @@ from pathlib import Path
 import joblib
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import f1_score
+from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, precision_score, recall_score
 from sklearn.model_selection import ParameterGrid
 from utils.config_loader import ConfigLoader
 from utils.error_handler import log_step
@@ -127,6 +127,49 @@ class RandomForest:
         # Return the best model.
         return best
 
+    @log_step("Train and val metrics")
+    def score_model(self, best: dict = None, windows: dict = None) -> dict:
+        """
+        Score the best model on the train and val windows. Test is left for model evaluation.
+
+        Args:
+            best (dict): The best 'model', 'params' and 'f1'.
+            windows (dict): Flattened windows for 'train' and 'val'.
+
+        Returns:
+            dict: The best model with a 'metrics' entry per split.
+        """
+
+        # Start with no metrics.
+        best["metrics"] = {}
+
+        # Score each split.
+        for name in ("train", "val"):
+
+            # Get the true labels.
+            y = windows[name]["y"]
+
+            # Predict the labels.
+            predictions = best["model"].predict(windows[name]["X"])
+
+            # Calculate the metrics for the extreme class.
+            metrics = {
+                "accuracy": accuracy_score(y, predictions),
+                "precision": precision_score(y, predictions, zero_division = 0),
+                "recall": recall_score(y, predictions, zero_division = 0),
+                "f1": f1_score(y, predictions, zero_division = 0),
+                "confusion": confusion_matrix(y, predictions, labels = [0, 1]).tolist(),
+            }
+
+            # Store the split's metrics.
+            best["metrics"][name] = metrics
+
+            # Log the split's metrics.
+            self.logger.info(f"{name}: accuracy {metrics['accuracy']:.2f}, precision {metrics['precision']:.2f}, recall {metrics['recall']:.2f}, F1 {metrics['f1']:.2f}, confusion {metrics['confusion']}.")
+
+        # Return the best model with metrics.
+        return best
+
     @log_step("Save model")
     def save_model(self, best: dict = None, path: str = None) -> dict:
         """
@@ -141,7 +184,7 @@ class RandomForest:
         """
 
         # Bundle the model with what is needed to use it.
-        bundle = {"model": best["model"], "params": best["params"], "val_f1": best["f1"], "features": self.features, "window": self.window}
+        bundle = {"model": best["model"], "params": best["params"], "val_f1": best["f1"], "metrics": best["metrics"], "features": self.features, "window": self.window}
 
         # Create the output directory if it does not exist.
         Path(path).parent.mkdir(parents = True, exist_ok = True)
@@ -165,6 +208,9 @@ class RandomForest:
 
         # Tune on the validation set.
         best = self.tune_model(windows = windows)
+
+        # Score the best model on train and val.
+        best = self.score_model(best = best, windows = windows)
 
         # Save the best model.
         self.save_model(best = best, path = self.output["model"])

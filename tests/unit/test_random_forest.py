@@ -139,6 +139,37 @@ class TestTuneModel:
         # Check one warning was logged.
         assert len(warnings) == 1
 
+class TestScoreModel:
+    """
+    Unit tests for RandomForest.score_model.
+    """
+
+    def test_score_model_train_and_val(self, forest):
+        """
+        Score the best model on train and val only, with a confusion matrix covering every sample.
+
+        Args:
+            forest (RandomForest): Random forest pipeline object.
+        """
+
+        # Build windows.
+        windows = forest.build_windows(splits = fake_splits(features = forest.features, target = forest.target["column"]))
+
+        # Tune and score the model.
+        best = forest.score_model(best = forest.tune_model(windows = windows), windows = windows)
+
+        # Check only train and val were scored.
+        assert sorted(best["metrics"]) == ["train", "val"]
+
+        # Check every metric is present.
+        assert sorted(best["metrics"]["val"]) == ["accuracy", "confusion", "f1", "precision", "recall"]
+
+        # Check the confusion matrix counts every val sample.
+        assert sum(map(sum, best["metrics"]["val"]["confusion"])) == len(windows["val"]["y"])
+
+        # Check the val F1 matches the tuning score.
+        assert best["metrics"]["val"]["f1"] == pytest.approx(best["f1"])
+
 class TestSaveModel:
     """
     Unit tests for RandomForest.save_model.
@@ -156,8 +187,8 @@ class TestSaveModel:
         # Build windows.
         windows = forest.build_windows(splits = fake_splits(features = forest.features, target = forest.target["column"]))
 
-        # Tune the model.
-        best = forest.tune_model(windows = windows)
+        # Tune and score the model.
+        best = forest.score_model(best = forest.tune_model(windows = windows), windows = windows)
 
         # Build the output path.
         path = tmp_path / "models" / "rf.joblib"
@@ -169,7 +200,7 @@ class TestSaveModel:
         bundle = joblib.load(path)
 
         # Check the bundle contents.
-        assert sorted(bundle) == ["features", "model", "params", "val_f1", "window"]
+        assert sorted(bundle) == ["features", "metrics", "model", "params", "val_f1", "window"]
 
 class TestPipeline:
     """
