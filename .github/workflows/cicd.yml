@@ -127,12 +127,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="data-${APP_ENV}-$(date -u +%Y-%m-%d)-${GITHUB_SHA::7}"
+          DATE="$(date -u +%Y-%m-%d)"
+          TAG="data-${APP_ENV}-${DATE}-${GITHUB_SHA::7}"
           cp logs/pipeline.log logs/retrieval.log
           gh release create "$TAG" data/raw/apple_stock_raw.xlsx logs/retrieval.log \
             --repo "${{ github.repository }}" \
             --target "${{ github.sha }}" \
-            --title "Data $TAG" \
+            --title "${APP_ENV^} data — ${DATE} (${GITHUB_SHA::7})" \
             --notes "AAPL data for ${APP_ENV}, produced by commit ${{ github.sha }} on branch ${{ github.ref_name }}."
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
@@ -172,3 +173,40 @@ jobs:
         run: |
           cp logs/pipeline.log logs/preprocessing.log
           gh release upload "$TAG" data/interim/apple_stock_clean.xlsx logs/preprocessing.log --repo "${{ github.repository }}"
+
+  # Feature engineering: build features from the clean data in the release and add the feature dataset to the same release.
+  features:
+    needs: [retrieve, preprocess]
+    runs-on: ubuntu-24.04
+    # Allow uploading release files and pulling the image.
+    permissions:
+      contents: write
+      packages: read
+    env:
+      # Release created by the retrieve job.
+      TAG: ${{ needs.retrieve.outputs.tag }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      # Log in to GitHub Container Registry.
+      - name: Log in to GHCR
+        uses: docker/login-action@v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Download the clean data from the release.
+      - name: Download clean data
+        run: gh release download "$TAG" --pattern apple_stock_clean.xlsx --dir data/interim --repo "${{ github.repository }}"
+
+      # Run feature engineering with the target environment's configs, writing data/ and logs/ to the runner through mounted folders.
+      - name: Run feature engineering
+        run: |
+          mkdir -p logs
+          docker run --rm -e APP_ENV=${{ env.APP_ENV }} -u $(id -u):$(id -g) -v "$PWD/data":/app/data -v "$PWD/logs":/app/logs ${{ env.IMAGE }}:${{ github.sha }} python -m src.3_feature_engineering
+
+      # Add the feature dataset and feature engineering log to the release.
+      - name: Upload features
+        run: |
+          cp logs/pipeline.log logs/features.log
+          gh release upload "$TAG" data/processed/apple_stock_features.xlsx logs/features.log --repo "${{ github.repository }}"
