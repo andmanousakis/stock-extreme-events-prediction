@@ -115,6 +115,12 @@ class RandomForest:
                 # Store the new best.
                 best = {"model": model, "params": params, "f1": f1}
 
+        # Warn when no combination found any extreme day, since the choice of best is then arbitrary.
+        if best["f1"] == 0:
+
+            # Log a warning.
+            self.logger.warning(f"Val F1 is 0 for all settings ({int(windows['val']['y'].sum())} extreme days in val); too few extreme days to tune, keeping the first combination.")
+
         # Log the best combination.
         self.logger.info(f"Best params {best['params']}, val F1 {best['f1']:.3f}.")
 

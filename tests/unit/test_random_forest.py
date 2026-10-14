@@ -109,6 +109,36 @@ class TestTuneModel:
         # Check the best parameters came from the grid.
         assert best["params"]["max_depth"] in (3, None)
 
+    def test_tune_model_warns_when_all_f1_zero(self, forest, monkeypatch):
+        """
+        Warn when no setting finds any extreme day in val, because the best choice is then arbitrary.
+
+        Args:
+            forest (RandomForest): Random forest pipeline object.
+            monkeypatch (pytest.MonkeyPatch): Pytest helper for temporary changes.
+        """
+
+        # Build windows.
+        windows = forest.build_windows(splits = fake_splits(features = forest.features, target = forest.target["column"]))
+
+        # Remove every extreme day from val so F1 is 0 for all settings.
+        windows["val"]["y"] = np.zeros_like(windows["val"]["y"])
+
+        # Record warnings instead of logging them.
+        warnings = []
+
+        # Replace the logger's warning method with the recorder.
+        monkeypatch.setattr(forest.logger, "warning", warnings.append)
+
+        # Tune the model.
+        best = forest.tune_model(windows = windows)
+
+        # Check the best F1 is 0.
+        assert best["f1"] == 0
+
+        # Check one warning was logged.
+        assert len(warnings) == 1
+
 class TestSaveModel:
     """
     Unit tests for RandomForest.save_model.

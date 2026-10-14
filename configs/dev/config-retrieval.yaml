@@ -1,6 +1,6 @@
 request:
   symbol: AAPL
-  start: "2023-01-01"
+  start: "2019-01-01"
   end: "2024-01-01"
   max_retries: 3
   base_delay: 2
