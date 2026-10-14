@@ -54,7 +54,7 @@ ci  >  cd  >  integration  >  retrieve  >  preprocess  >  features  >  split  > 
 1. **ci** — builds the image and runs the unit tests. Runs on every push and pull request.
 2. **cd** — publishes the image to GitHub Container Registry as `ghcr.io/andmanousakis/stock-extreme:<environment>` and `:<commit>`. Runs on pushes only.
 3. **integration** — pulls the published image and runs the integration tests against Yahoo Finance.
-4. **retrieve** — runs data retrieval in the published image and keeps the raw data and log as a `data-<environment>-<date>-<commit>` release.
+4. **retrieve** — runs data retrieval in the published image and keeps the raw data and log as a `data-<environment>-<date>-<commit>-r<run>.<attempt>` release, so every run and re-run gets its own release.
 5. **preprocess** — downloads the raw data from that release, cleans it in the published image and adds the clean data and log to the same release.
 6. **features** — downloads the clean data from that release, builds the features and next-day target in the published image and adds the feature dataset and log to the same release.
 7. **split** — downloads the feature dataset from that release, splits it in time order (70% train, 15% val, 15% test) in the published image and adds the three sets and log to the same release.

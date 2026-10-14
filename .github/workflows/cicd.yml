@@ -121,19 +121,20 @@ jobs:
           mkdir -p data logs
           docker run --rm -e APP_ENV=${{ env.APP_ENV }} -u $(id -u):$(id -g) -v "$PWD/data":/app/data -v "$PWD/logs":/app/logs ${{ env.IMAGE }}:${{ github.sha }} python -m src.1_data_retrieval
 
-      # Publish the raw data and retrieval log as a release tagged data-<environment>-<date>-<short sha>.
+      # Publish the raw data and retrieval log as a release tagged data-<environment>-<date>-<short sha>-r<run number>.<attempt>, unique per run and re-run.
       - name: Create data release
         id: release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           DATE="$(date -u +%Y-%m-%d)"
-          TAG="data-${APP_ENV}-${DATE}-${GITHUB_SHA::7}"
+          RUN="r${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
+          TAG="data-${APP_ENV}-${DATE}-${GITHUB_SHA::7}-${RUN}"
           cp logs/pipeline.log logs/retrieval.log
           gh release create "$TAG" data/raw/apple_stock_raw.xlsx logs/retrieval.log \
             --repo "${{ github.repository }}" \
             --target "${{ github.sha }}" \
-            --title "${APP_ENV^} data — ${DATE} (${GITHUB_SHA::7})" \
+            --title "${APP_ENV^} data — ${DATE} (${GITHUB_SHA::7}, run ${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT})" \
             --notes "AAPL data for ${APP_ENV}, produced by commit ${{ github.sha }} on branch ${{ github.ref_name }}."
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
