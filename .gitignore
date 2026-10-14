@@ -9,8 +9,9 @@ data/
 logs/
 /*.xlsx
 
-# Trained models
+# Trained models and reports
 models/*.joblib
+reports/
 
 # Local reference material
 docs/

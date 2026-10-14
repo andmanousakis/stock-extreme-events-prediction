@@ -163,11 +163,11 @@ class TemporalCNN:
         # Create the cross-entropy loss.
         loss_fn = nn.CrossEntropyLoss(weight = weights)
 
-        # Create the Adam optimizer.
-        optimizer = torch.optim.Adam(network.parameters(), lr = self.training["learning_rate"])
+        # Create the Adam optimizer, with weight decay penalising large weights if configured.
+        optimizer = torch.optim.Adam(network.parameters(), lr = self.training["learning_rate"], weight_decay = self.training["weight_decay"])
 
         # Start with no best epoch.
-        best = {"val_loss": float("inf"), "epoch": 0, "state": None}
+        best = {"score": -float("inf"), "val_loss": float("inf"), "epoch": 0, "state": None}
 
         # Count epochs without improvement.
         stale = 0
@@ -206,16 +206,25 @@ class TemporalCNN:
             with torch.no_grad():
 
                 # Score the validation windows.
-                val_loss = loss_fn(network(X_val), y_val).item()
+                val_scores = network(X_val)
 
-            # Log the epoch's losses.
-            self.logger.debug(f"Epoch {epoch}: train loss {train_loss / len(train_loader.dataset):.4f}, val loss {val_loss:.4f}.")
+            # Calculate the validation loss.
+            val_loss = loss_fn(val_scores, y_val).item()
 
-            # Keep the weights if validation loss improved.
-            if val_loss < best["val_loss"]:
+            # Calculate the validation F1 for the extreme class.
+            val_f1 = f1_score(y_val.numpy(), val_scores.argmax(dim = 1).numpy(), zero_division = 0)
+
+            # Log the epoch's losses and F1.
+            self.logger.debug(f"Epoch {epoch}: train loss {train_loss / len(train_loader.dataset):.4f}, val loss {val_loss:.4f}, val F1 {val_f1:.3f}.")
+
+            # Score the epoch by the configured metric, higher being better.
+            score = val_f1 if self.training["early_stopping_metric"] == "f1" else -val_loss
+
+            # Keep the weights if the score improved.
+            if score > best["score"]:
 
                 # Store the new best epoch.
-                best = {"val_loss": val_loss, "epoch": epoch, "state": copy.deepcopy(network.state_dict())}
+                best = {"score": score, "val_loss": val_loss, "epoch": epoch, "state": copy.deepcopy(network.state_dict())}
 
                 # Reset the count.
                 stale = 0
@@ -236,10 +245,48 @@ class TemporalCNN:
         network.load_state_dict(best["state"])
 
         # Log the stopping point.
-        self.logger.info(f"Stopped after {epoch} epochs, best epoch {best['epoch']} with val loss {best['val_loss']:.4f}.")
+        self.logger.info(f"Stopped after {epoch} epochs, best epoch {best['epoch']} by val {self.training['early_stopping_metric']}, val loss {best['val_loss']:.4f}.")
 
         # Return the trained network.
         return {"network": network, "best_epoch": best["epoch"], "best_val_loss": best["val_loss"], "epochs_run": epoch}
+
+    @log_step("Threshold tuning")
+    def tune_threshold(self, result: dict = None, windows: dict = None) -> dict:
+        """
+        Pick the probability above which a day is called extreme. If tuning is on, try thresholds from 0.05 to 0.95 and keep
+        the one with the best validation F1; otherwise use 0.5.
+
+        Args:
+            result (dict): The trained 'network' and training details.
+            windows (dict): Windows for 'val'.
+
+        Returns:
+            dict: The result with a 'threshold' entry.
+        """
+
+        # Use 0.5 unless tuning is on.
+        result["threshold"] = 0.5
+
+        # Tune the threshold if configured.
+        if self.training["tune_threshold"]:
+
+            # Predict the probability of an extreme day for each validation window.
+            probabilities = result["network"].predict_proba(torch.tensor(windows["val"]["X"]))[:, 1].numpy()
+
+            # Try thresholds from 0.05 to 0.95.
+            thresholds = np.round(np.arange(0.05, 0.96, 0.05), 2)
+
+            # Score each threshold by validation F1.
+            scores = [f1_score(windows["val"]["y"], (probabilities >= t).astype(int), zero_division = 0) for t in thresholds]
+
+            # Keep the threshold with the best F1.
+            result["threshold"] = float(thresholds[int(np.argmax(scores))])
+
+        # Log the threshold.
+        self.logger.info(f"Threshold {result['threshold']:.2f}.")
+
+        # Return the result with the threshold.
+        return result
 
     @log_step("Train and val metrics")
     def score_model(self, result: dict = None, windows: dict = None) -> dict:
@@ -263,8 +310,8 @@ class TemporalCNN:
             # Get the true labels.
             y = windows[name]["y"]
 
-            # Predict the class with the highest probability.
-            predictions = result["network"].predict_proba(torch.tensor(windows[name]["X"])).argmax(dim = 1).numpy()
+            # Call a day extreme when its probability reaches the threshold.
+            predictions = (result["network"].predict_proba(torch.tensor(windows[name]["X"]))[:, 1].numpy() >= result["threshold"]).astype(int)
 
             # Calculate the metrics for the extreme class.
             metrics = {
@@ -307,6 +354,7 @@ class TemporalCNN:
             "training": self.training,
             "best_epoch": result["best_epoch"],
             "epochs_run": result["epochs_run"],
+            "threshold": result["threshold"],
             "metrics": result["metrics"],
         }
 
@@ -338,6 +386,9 @@ class TemporalCNN:
 
         # Train with early stopping.
         result = self.train_model(network = network, windows = windows)
+
+        # Pick the decision threshold.
+        result = self.tune_threshold(result = result, windows = windows)
 
         # Score on train and val.
         result = self.score_model(result = result, windows = windows)

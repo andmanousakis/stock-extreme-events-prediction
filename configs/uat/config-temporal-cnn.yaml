@@ -22,6 +22,9 @@ training:
   max_epochs: 200
   patience: 15
   class_weights: false
+  weight_decay: 0.0
+  early_stopping_metric: loss
+  tune_threshold: false
 
 output:
   model: models/temporal_cnn.joblib

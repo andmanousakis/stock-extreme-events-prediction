@@ -131,8 +131,8 @@ class TestTrainModel:
         # Build windows.
         windows = prepared_windows(cnn = cnn)
 
-        # Train and score the network.
-        result = cnn.score_model(result = cnn.train_model(network = cnn.build_network(), windows = windows), windows = windows)
+        # Train the network, pick the threshold and score it.
+        result = cnn.score_model(result = cnn.tune_threshold(result = cnn.train_model(network = cnn.build_network(), windows = windows), windows = windows), windows = windows)
 
         # Check the rule was learned.
         assert result["metrics"]["val"]["f1"] > 0.8
@@ -183,8 +183,8 @@ class TestSaveModel:
         # Build windows.
         windows = prepared_windows(cnn = cnn)
 
-        # Train and score the network.
-        result = cnn.score_model(result = cnn.train_model(network = cnn.build_network(), windows = windows), windows = windows)
+        # Train the network, pick the threshold and score it.
+        result = cnn.score_model(result = cnn.tune_threshold(result = cnn.train_model(network = cnn.build_network(), windows = windows), windows = windows), windows = windows)
 
         # Build the output path.
         path = tmp_path / "models" / "tcnn.joblib"

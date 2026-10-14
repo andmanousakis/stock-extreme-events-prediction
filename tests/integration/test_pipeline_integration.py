@@ -66,8 +66,11 @@ class TestPipelineIntegration:
         # Recalculate each day's extreme event from the clean data.
         events = (clean[engineering.daily_returns_config["price_column"]].pct_change().mul(100).abs() > engineering.extreme_events_config["threshold"]).astype(int)
 
+        # Pair each date with the next day's extreme event.
+        expected = pd.Series(events.shift(-1).to_numpy(), index = clean["Date"])
+
         # Check each target is the next day's extreme event.
-        assert features[engineering.target["column"]].tolist() == events.shift(-1).iloc[1:-1].astype(int).tolist()
+        assert features[engineering.target["column"]].tolist() == expected.loc[features["Date"]].astype(int).tolist()
 
         # Read the splits.
         splits = {name: pd.read_excel(workdir / splitter.output[name]) for name in ("train", "val", "test")}
