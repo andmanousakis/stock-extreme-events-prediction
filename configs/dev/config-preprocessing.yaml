@@ -1,5 +1,9 @@
 input:
   raw_data: data/raw/apple_stock_raw.xlsx
+  schema: raw_stock
+
+missing_values:
+  columns: [Adj Close, Close, High, Low, Open, Volume]
 
 imputation:
   volume_column: Volume
@@ -18,6 +22,7 @@ split:
   val_end: 0.85
 
 output:
+  clean_data: data/interim/apple_stock_clean.xlsx
   dataset: apple_stock_data.xlsx
   training_set: training_set.xlsx
   validation_set: validation_set.xlsx
