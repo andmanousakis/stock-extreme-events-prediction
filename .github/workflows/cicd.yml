@@ -247,3 +247,40 @@ jobs:
         run: |
           cp logs/pipeline.log logs/split.log
           gh release upload "$TAG" data/processed/splits/train.xlsx data/processed/splits/val.xlsx data/processed/splits/test.xlsx logs/split.log --repo "${{ github.repository }}"
+
+  # Random forest: train and tune on the splits from the release and add the trained model to the same release.
+  random-forest:
+    needs: [retrieve, split]
+    runs-on: ubuntu-24.04
+    # Allow uploading release files and pulling the image.
+    permissions:
+      contents: write
+      packages: read
+    env:
+      # Release created by the retrieve job.
+      TAG: ${{ needs.retrieve.outputs.tag }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      # Log in to GitHub Container Registry.
+      - name: Log in to GHCR
+        uses: docker/login-action@v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Download the train, val and test sets from the release.
+      - name: Download splits
+        run: gh release download "$TAG" --pattern train.xlsx --pattern val.xlsx --pattern test.xlsx --dir data/processed/splits --repo "${{ github.repository }}"
+
+      # Train the random forest with the target environment's configs, writing data/, models/ and logs/ to the runner through mounted folders.
+      - name: Train random forest
+        run: |
+          mkdir -p models logs
+          docker run --rm -e APP_ENV=${{ env.APP_ENV }} -u $(id -u):$(id -g) -v "$PWD/data":/app/data -v "$PWD/models":/app/models -v "$PWD/logs":/app/logs ${{ env.IMAGE }}:${{ github.sha }} python -m src.5_random_forest
+
+      # Add the trained model and training log to the release.
+      - name: Upload model
+        run: |
+          cp logs/pipeline.log logs/random_forest.log
+          gh release upload "$TAG" models/random_forest.joblib logs/random_forest.log --repo "${{ github.repository }}"
