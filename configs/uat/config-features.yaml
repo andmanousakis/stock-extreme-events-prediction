@@ -1,0 +1,17 @@
+input:
+  clean_data: data/interim/apple_stock_clean.xlsx
+
+daily_returns:
+  price_column: Adj Close
+
+extreme_events:
+  threshold: 2
+
+target:
+  column: extreme_event_next_day
+  shift: 1
+
+features: [Open, High, Low, Close, Volume, daily_return]
+
+output:
+  features: data/processed/apple_stock_features.xlsx
