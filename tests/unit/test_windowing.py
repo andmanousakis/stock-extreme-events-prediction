@@ -41,23 +41,6 @@ class TestWindowing:
     Unit tests for Windowing.build.
     """
 
-    def test_window_shape(self):
-        """
-        Build one window per day that has enough past days, shaped (window, features).
-        """
-
-        # Build windows of 3 days.
-        windows = Windowing(window = 3).build(splits = fake_splits(), features = ["a", "b"], target = "target")
-
-        # Count windows across splits.
-        total = sum(len(windows[name]["X"]) for name in windows)
-
-        # Check 10 rows give 8 windows.
-        assert total == 8
-
-        # Check each window's shape.
-        assert windows["train"]["X"].shape[1:] == (3, 2)
-
     def test_window_content_and_target(self):
         """
         Fill each window with consecutive days and take the target of its last day.

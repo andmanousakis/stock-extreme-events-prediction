@@ -1,0 +1,27 @@
+input:
+  train: data/processed/splits/train.xlsx
+  val: data/processed/splits/val.xlsx
+  test: data/processed/splits/test.xlsx
+
+features: [Open, High, Low, Close, Volume, daily_return]
+
+target:
+  column: extreme_event_next_day
+
+window: 10
+
+network:
+  channels: [32, 64]
+  kernel_size: 3
+  dropout: 0.3
+
+training:
+  seed: 42
+  batch_size: 32
+  learning_rate: 0.001
+  max_epochs: 200
+  patience: 15
+  class_weights: false
+
+output:
+  model: models/temporal_cnn.joblib

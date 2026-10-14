@@ -9,7 +9,7 @@ Binary classifier for extreme daily moves in Apple (AAPL) stock, defined as days
 make help
 ```
 
-**Build image, run tests and run the pipeline (retrieval, preprocessing, feature engineering, data split, random forest):**
+**Build image, run tests and run the pipeline (retrieval, preprocessing, feature engineering, data split, random forest, temporal CNN):**
 ```bash
 make stock-extreme-dev-build-up
 ```
@@ -45,10 +45,11 @@ make stock-extreme-dev-wipe-docker
 
 ## CI/CD
 
-GitHub Actions ([`.github/workflows/cicd.yml`](.github/workflows/cicd.yml)) runs eight jobs in sequence; each runs only if the previous one succeeded:
+GitHub Actions ([`.github/workflows/cicd.yml`](.github/workflows/cicd.yml)) runs nine jobs; each runs only if the jobs before it succeeded, and the two models train in parallel:
 
 ```
 ci  >  cd  >  integration  >  retrieve  >  preprocess  >  features  >  split  >  random-forest
+                                                                         >  temporal-cnn
 ```
 
 1. **ci** — builds the image and runs the unit tests. Runs on every push and pull request.
@@ -59,6 +60,7 @@ ci  >  cd  >  integration  >  retrieve  >  preprocess  >  features  >  split  > 
 6. **features** — downloads the clean data from that release, builds the features and next-day target in the published image and adds the feature dataset and log to the same release.
 7. **split** — downloads the feature dataset from that release, splits it in time order (70% train, 15% val, 15% test) in the published image and adds the three sets and log to the same release.
 8. **random-forest** — downloads the three sets from that release, trains a random forest on 10-day windows, tuned on the validation set, in the published image and adds the trained model and log to the same release.
+9. **temporal-cnn** — downloads the three sets from that release, trains the temporal CNN on scaled 10-day sequences with early stopping on the validation set, in the published image and adds the trained model and log to the same release.
 
 GitHub Actions builds from [`docker/deploy/Dockerfile`](docker/deploy/Dockerfile). [`docker/local/`](docker/local/) and the makefile are for local development only.
 

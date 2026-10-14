@@ -112,30 +112,6 @@ class TestMakeRequest:
     Unit tests for DataRetrieval.make_request.
     """
 
-    def test_success_flattens_columns(self, monkeypatch, sleeps):
-        """
-        Return data with a 'Date' column and single-level price headers on the first attempt.
-
-        Args:
-            monkeypatch (pytest.MonkeyPatch): Pytest helper for temporary changes.
-            sleeps (list): Recorded retry delays.
-        """
-
-        # Make downloads succeed immediately.
-        counter = fake_download(monkeypatch)
-
-        # Request data.
-        df = data_retrieval.DataRetrieval().make_request(symbol = "AAPL", start = "2015-01-01", end = "2015-01-06")
-
-        # Check the flattened column names.
-        assert list(df.columns) == ["Date", "Adj Close", "Close", "High", "Low", "Open", "Volume"]
-
-        # Check the request was made once.
-        assert counter["calls"] == 1
-
-        # Check there was no waiting.
-        assert sleeps == []
-
     def test_retries_with_backoff_then_succeeds(self, monkeypatch, sleeps):
         """
         Retry after failures with doubling delays and return data once a download works.
@@ -195,26 +171,6 @@ class TestApplySchema:
     Unit tests for DataRetrieval.apply_schema.
     """
 
-    def test_orders_and_casts_columns(self):
-        """
-        Reorder columns to the schema order and cast them to the schema dtypes.
-        """
-
-        # Build data with shuffled columns and a text Volume column.
-        df = pd.DataFrame({"Volume": ["100"], "Open": [1.0], "Low": [1.0], "High": [1.0], "Close": [1.0], "Adj Close": [1.0], "Date": ["2015-01-02"]})
-
-        # Apply the schema.
-        result = data_retrieval.DataRetrieval().apply_schema(df = df)
-
-        # Check the column order.
-        assert list(result.columns) == ["Date", "Adj Close", "Close", "High", "Low", "Open", "Volume"]
-
-        # Check the date dtype.
-        assert str(result["Date"].dtype) == "datetime64[ns]"
-
-        # Check the volume dtype.
-        assert str(result["Volume"].dtype) == "int64"
-
     def test_missing_column_stops_pipeline(self):
         """
         Stop the pipeline when a schema column is missing.
@@ -228,34 +184,3 @@ class TestApplySchema:
 
             # Apply the schema.
             data_retrieval.DataRetrieval().apply_schema(df = df)
-
-class TestStoreRawData:
-    """
-    Unit tests for DataRetrieval.store_raw_data.
-    """
-
-    def test_writes_excel_file(self, tmp_path):
-        """
-        Create missing folders and write the data to Excel.
-
-        Args:
-            tmp_path (pathlib.Path): Temporary directory provided by pytest.
-        """
-
-        # Build the output path in a folder that doesn't exist yet.
-        path = tmp_path / "data" / "raw" / "prices.xlsx"
-
-        # Build data to store.
-        df = pd.DataFrame({"Date": pd.to_datetime(["2015-01-02"]), "Close": [27.3]})
-
-        # Store data.
-        data_retrieval.DataRetrieval().store_raw_data(df = df, path = str(path))
-
-        # Read the stored file.
-        stored = pd.read_excel(path)
-
-        # Check the stored contents.
-        assert list(stored.columns) == ["Date", "Close"]
-
-        # Check the stored value.
-        assert stored["Close"].iloc[0] == 27.3

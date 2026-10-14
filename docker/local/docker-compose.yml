@@ -16,5 +16,5 @@ services:
     volumes:
       # Share the project folder so code changes and outputs sync with your machine.
       - ../..:/app
-    # Run the unit and integration tests, then data retrieval, preprocessing, feature engineering, the data split and random forest training, each only if the previous step passed (no .pytest_cache in the project).
-    command: sh -c "python -m pytest -v -p no:cacheprovider && python -m src.1_data_retrieval && python -m src.2_data_preprocessing && python -m src.3_feature_engineering && python -m src.4_data_split && python -m src.5_random_forest"
+    # Run the unit and integration tests, then data retrieval, preprocessing, feature engineering, the data split, random forest and temporal CNN training, each only if the previous step passed (no .pytest_cache in the project).
+    command: sh -c "python -m pytest -v -p no:cacheprovider && python -m src.1_data_retrieval && python -m src.2_data_preprocessing && python -m src.3_feature_engineering && python -m src.4_data_split && python -m src.5_random_forest && python -m src.6_temporal_cnn"
