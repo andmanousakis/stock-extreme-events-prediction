@@ -16,5 +16,5 @@ services:
     volumes:
       # Share the project folder so code changes and outputs sync with your machine.
       - ../..:/app
-    # Run the unit and integration tests, then the pipeline only if they pass (no .pytest_cache in the project).
-    command: sh -c "python -m pytest -v -p no:cacheprovider && python -m src.1_data_retrieval"
+    # Run the unit and integration tests, then data retrieval and preprocessing, each only if the previous step passed (no .pytest_cache in the project).
+    command: sh -c "python -m pytest -v -p no:cacheprovider && python -m src.1_data_retrieval && python -m src.2_data_preprocessing"

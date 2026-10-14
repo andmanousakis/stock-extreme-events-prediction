@@ -9,12 +9,12 @@ Binary classifier for extreme daily moves in Apple (AAPL) stock, defined as days
 make help
 ```
 
-**Build image, run tests and start data retrieval:**
+**Build image, run tests and run the pipeline (retrieval, preprocessing):**
 ```bash
 make stock-extreme-dev-build-up
 ```
 
-**Run tests and start data retrieval (image already built):**
+**Run tests and run the pipeline (image already built):**
 ```bash
 make stock-extreme-dev-up
 ```
@@ -45,16 +45,17 @@ make stock-extreme-dev-wipe-docker
 
 ## CI/CD
 
-GitHub Actions ([`.github/workflows/cicd.yml`](.github/workflows/cicd.yml)) runs four jobs in sequence; each runs only if the previous one succeeded:
+GitHub Actions ([`.github/workflows/cicd.yml`](.github/workflows/cicd.yml)) runs five jobs in sequence; each runs only if the previous one succeeded:
 
 ```
-ci  >  cd  >  integration  >  retrieve
+ci  >  cd  >  integration  >  retrieve  >  preprocess
 ```
 
 1. **ci** — builds the image and runs the unit tests. Runs on every push and pull request.
 2. **cd** — publishes the image to GitHub Container Registry as `ghcr.io/andmanousakis/stock-extreme:<environment>` and `:<commit>`. Runs on pushes only.
 3. **integration** — pulls the published image and runs the integration tests against Yahoo Finance.
 4. **retrieve** — runs data retrieval in the published image and keeps the raw data and log as a `data-<environment>-<date>-<commit>` release.
+5. **preprocess** — downloads the raw data from that release, cleans it in the published image and adds the clean data and log to the same release.
 
 GitHub Actions builds from [`docker/deploy/Dockerfile`](docker/deploy/Dockerfile). [`docker/local/`](docker/local/) and the makefile are for local development only.
 

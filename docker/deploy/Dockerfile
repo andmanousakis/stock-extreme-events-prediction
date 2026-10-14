@@ -41,5 +41,6 @@ COPY configs ./configs
 COPY schemas ./schemas
 COPY tests ./tests
 
-# Run data retrieval by default.
-CMD ["python", "-m", "src.1_data_retrieval"]
+# Run the pipeline by default: data retrieval, then preprocessing.
+CMD ["sh", "-c", "python -m src.1_data_retrieval && python -m src.2_data_preprocessing"]
+
