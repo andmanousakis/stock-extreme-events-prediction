@@ -41,6 +41,6 @@ COPY configs ./configs
 COPY schemas ./schemas
 COPY tests ./tests
 
-# Run the pipeline by default: data retrieval, preprocessing, feature engineering, the data split, random forest training, then temporal CNN training.
-CMD ["sh", "-c", "python -m src.1_data_retrieval && python -m src.2_data_preprocessing && python -m src.3_feature_engineering && python -m src.4_data_split && python -m src.5_random_forest && python -m src.6_temporal_cnn"]
+# Run the pipeline by default: data retrieval, preprocessing, feature engineering, the data split, random forest and temporal CNN training, the improvement experiments, then model evaluation.
+CMD ["sh", "-c", "python -m src.1_data_retrieval && python -m src.2_data_preprocessing && python -m src.3_feature_engineering && python -m src.4_data_split && python -m src.5_random_forest && python -m src.6_temporal_cnn && python -m src.7_improvement && python -m src.8_model_evaluation"]
 

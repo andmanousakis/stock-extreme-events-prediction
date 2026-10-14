@@ -9,7 +9,7 @@ Binary classifier for extreme daily moves in Apple (AAPL) stock, defined as days
 make help
 ```
 
-**Build image, run tests and run the pipeline (retrieval, preprocessing, feature engineering, data split, random forest, temporal CNN):**
+**Build image, run tests and run the pipeline (retrieval, preprocessing, feature engineering, data split, random forest, temporal CNN, improvement, evaluation):**
 ```bash
 make stock-extreme-dev-build-up
 ```
@@ -45,10 +45,12 @@ make stock-extreme-dev-wipe-docker
 
 ## CI/CD
 
-GitHub Actions ([`.github/workflows/cicd.yml`](.github/workflows/cicd.yml)) runs nine jobs; each runs only if the jobs before it succeeded, and the two models train in parallel:
+GitHub Actions ([`.github/workflows/cicd.yml`](.github/workflows/cicd.yml)) runs eleven jobs; each runs only if the jobs it depends on succeeded, and the three training jobs run in parallel:
 
 ```
-ci  >  cd  >  integration  >  retrieve  >  preprocess  >  features  >  split  >  random-forest  >  temporal-cnn
+ci > cd > integration > retrieve > preprocess > features > split ─┬─> random-forest ─┐
+                                                                 ├─> temporal-cnn  ──┼─> evaluation
+                                                                 └─> improvement   ──┘
 ```
 
 1. **ci** — builds the image and runs the unit tests. Runs on every push and pull request.
@@ -60,6 +62,8 @@ ci  >  cd  >  integration  >  retrieve  >  preprocess  >  features  >  split  > 
 7. **split** — downloads the feature dataset from that release, splits it in time order (70% train, 15% val, 15% test) in the published image and adds the three sets and log to the same release.
 8. **random-forest** — downloads the three sets from that release, trains a random forest on 10-day windows, tuned on the validation set, in the published image and adds the trained model and log to the same release.
 9. **temporal-cnn** — downloads the three sets from that release, trains the temporal CNN on scaled 10-day sequences with early stopping on the validation set, in the published image and adds the trained model and log to the same release.
+10. **improvement** — downloads the three sets from that release, trains temporal CNN variants (class weights, a tuned decision threshold, volatility features, a smaller regularised network), keeps the best by validation F1, and adds it with the comparison table and log to the same release.
+11. **evaluation** — downloads the three sets and the three trained models from that release, scores them and three simple baselines (never extreme, always extreme, persistence) on the test set, shows the results on the run page, and adds the report and log to the same release. This is the only job that scores on the test set.
 
 GitHub Actions builds from [`docker/deploy/Dockerfile`](docker/deploy/Dockerfile). [`docker/local/`](docker/local/) and the makefile are for local development only.
 
