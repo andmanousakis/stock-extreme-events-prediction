@@ -210,3 +210,40 @@ jobs:
         run: |
           cp logs/pipeline.log logs/features.log
           gh release upload "$TAG" data/processed/apple_stock_features.xlsx logs/features.log --repo "${{ github.repository }}"
+
+  # Data split: split the feature dataset from the release in time order and add the train, val and test sets to the same release.
+  split:
+    needs: [retrieve, features]
+    runs-on: ubuntu-24.04
+    # Allow uploading release files and pulling the image.
+    permissions:
+      contents: write
+      packages: read
+    env:
+      # Release created by the retrieve job.
+      TAG: ${{ needs.retrieve.outputs.tag }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      # Log in to GitHub Container Registry.
+      - name: Log in to GHCR
+        uses: docker/login-action@v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Download the feature dataset from the release.
+      - name: Download features
+        run: gh release download "$TAG" --pattern apple_stock_features.xlsx --dir data/processed --repo "${{ github.repository }}"
+
+      # Run the data split with the target environment's configs, writing data/ and logs/ to the runner through mounted folders.
+      - name: Run data split
+        run: |
+          mkdir -p logs
+          docker run --rm -e APP_ENV=${{ env.APP_ENV }} -u $(id -u):$(id -g) -v "$PWD/data":/app/data -v "$PWD/logs":/app/logs ${{ env.IMAGE }}:${{ github.sha }} python -m src.4_data_split
+
+      # Add the train, val and test sets and the split log to the release.
+      - name: Upload splits
+        run: |
+          cp logs/pipeline.log logs/split.log
+          gh release upload "$TAG" data/processed/splits/train.xlsx data/processed/splits/val.xlsx data/processed/splits/test.xlsx logs/split.log --repo "${{ github.repository }}"
