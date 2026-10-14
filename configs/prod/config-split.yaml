@@ -1,0 +1,14 @@
+input:
+  features: data/processed/apple_stock_features.xlsx
+
+target:
+  column: extreme_event_next_day
+
+ratios:
+  train: 0.70
+  val: 0.15
+
+output:
+  train: data/processed/splits/train.xlsx
+  val: data/processed/splits/val.xlsx
+  test: data/processed/splits/test.xlsx
