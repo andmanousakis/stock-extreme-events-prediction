@@ -48,8 +48,7 @@ make stock-extreme-dev-wipe-docker
 GitHub Actions ([`.github/workflows/cicd.yml`](.github/workflows/cicd.yml)) runs nine jobs; each runs only if the jobs before it succeeded, and the two models train in parallel:
 
 ```
-ci  >  cd  >  integration  >  retrieve  >  preprocess  >  features  >  split  >  random-forest
-                                                                         >  temporal-cnn
+ci  >  cd  >  integration  >  retrieve  >  preprocess  >  features  >  split  >  random-forest > temporal-cnn
 ```
 
 1. **ci** — builds the image and runs the unit tests. Runs on every push and pull request.
