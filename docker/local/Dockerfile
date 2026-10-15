@@ -25,6 +25,9 @@ ENV HOME=/tmp
 # Give matplotlib a writable config folder.
 ENV MPLCONFIGDIR=/tmp/matplotlib
 
+# Silence MLflow's warnings about git not being installed.
+ENV GIT_PYTHON_REFRESH=quiet
+
 # Work from the project root.
 WORKDIR /app
 

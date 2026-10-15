@@ -7,7 +7,8 @@ from utils.schema_loader import SchemaLoader
 
 class DataPreprocessing:
     """
-    Clean the raw stock price data: validate it, keep one row per trading day and fill any missing values.
+    Clean the raw stock price data and label it: validate it, keep one row per trading day, fill any missing values,
+    calculate daily returns, label extreme events and shift the target to the next day.
     """
 
     def __init__(self):
@@ -26,6 +27,15 @@ class DataPreprocessing:
 
         # Get the missing values configs.
         self.missing_values = self.config["missing_values"]
+
+        # Get the daily returns configs.
+        self.daily_returns_config = self.config["daily_returns"]
+
+        # Get the extreme events configs.
+        self.extreme_events_config = self.config["extreme_events"]
+
+        # Get the target configs.
+        self.target = self.config["target"]
 
         # Get the output configs.
         self.output = self.config["output"]
@@ -132,6 +142,75 @@ class DataPreprocessing:
         # Return data.
         return df
 
+    @log_step("Daily returns calculation")
+    def daily_returns(self, df: pd.DataFrame = None) -> pd.DataFrame:
+        """
+        Calculate the daily percentage return from one trading day to the next.
+
+        Args:
+            df (pd.DataFrame): Clean price data sorted by date.
+
+        Returns:
+            pd.DataFrame: Data with a 'daily_return' column, first row dropped.
+        """
+
+        # Calculate percentage change of the configured price column.
+        df["daily_return"] = df[self.daily_returns_config["price_column"]].pct_change() * 100
+
+        # Drop the first row, which has no previous day.
+        df = df.iloc[1:].reset_index(drop = True)
+
+        # Return data.
+        return df
+
+    @log_step("Extreme events labelling")
+    def extreme_events(self, df: pd.DataFrame = None) -> pd.DataFrame:
+        """
+        Label days whose absolute daily return exceeds the threshold as extreme events.
+
+        Args:
+            df (pd.DataFrame): Data with a 'daily_return' column.
+
+        Returns:
+            pd.DataFrame: Data with a binary 'extreme_event' column.
+        """
+
+        # Label days beyond the threshold in either direction.
+        df["extreme_event"] = (df["daily_return"].abs() > self.extreme_events_config["threshold"]).astype(int)
+
+        # Return data.
+        return df
+
+    @log_step("Target shift")
+    def shift_target(self, df: pd.DataFrame = None) -> pd.DataFrame:
+        """
+        Create the target as the extreme event of a later day, so each row predicts the future from today's data.
+
+        Args:
+            df (pd.DataFrame): Data with an 'extreme_event' column.
+
+        Returns:
+            pd.DataFrame: Data with the target column, last rows without a future label dropped.
+        """
+
+        # Move each day's label back by the configured number of days.
+        df[self.target["column"]] = df["extreme_event"].shift(-self.target["shift"])
+
+        # Drop the last rows, which have no future day to label them.
+        df = df.dropna(subset = [self.target["column"]]).reset_index(drop = True)
+
+        # Cast the target back to integers.
+        df[self.target["column"]] = df[self.target["column"]].astype(int)
+
+        # Count extreme days in the target.
+        extreme = int(df[self.target["column"]].sum())
+
+        # Log the class balance.
+        self.logger.info(f"Target: {extreme} of {len(df)} days are extreme ({extreme / len(df):.1%}).")
+
+        # Return data.
+        return df
+
     @log_step("Store clean data")
     def store_clean_data(self, df: pd.DataFrame = None, path: str = None) -> pd.DataFrame:
         """
@@ -170,6 +249,15 @@ class DataPreprocessing:
 
         # Fill missing values on trading days.
         df = self.handle_missing_values(df = df)
+
+        # Calculate daily returns.
+        df = self.daily_returns(df = df)
+
+        # Label extreme events.
+        df = self.extreme_events(df = df)
+
+        # Shift the target to the next day.
+        df = self.shift_target(df = df)
 
         # Store clean data.
         self.store_clean_data(df = df, path = self.output["clean_data"])

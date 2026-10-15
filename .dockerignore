@@ -9,3 +9,4 @@ models
 reports
 docs
 *.zip
+.env

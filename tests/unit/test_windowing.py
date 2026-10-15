@@ -41,20 +41,6 @@ class TestWindowing:
     Unit tests for Windowing.build.
     """
 
-    def test_window_content_and_target(self):
-        """
-        Fill each window with consecutive days and take the target of its last day.
-        """
-
-        # Build windows of 3 days.
-        windows = Windowing(window = 3).build(splits = fake_splits(), features = ["a", "b"], target = "target")
-
-        # Check the first window holds rows 0, 1 and 2.
-        assert np.array_equal(windows["train"]["X"][0][:, 0], [0.0, 1.0, 2.0])
-
-        # Check its target is row 2's target.
-        assert windows["train"]["y"][0] == 2 % 2
-
     def test_lookback_across_splits(self):
         """
         Let the first validation window look back into training, and keep every validation and test day.

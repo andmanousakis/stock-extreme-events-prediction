@@ -17,3 +17,6 @@ reports/
 docs/
 *.zip
 __MACOSX/
+
+# Local secrets
+.env

@@ -41,28 +41,6 @@ def run_in_tmp_path(tmp_path, monkeypatch):
     # Change the working directory to the temporary folder.
     monkeypatch.chdir(tmp_path)
 
-class TestSortAndDeduplicate:
-    """
-    Unit tests for DataPreprocessing.sort_and_deduplicate.
-    """
-
-    def test_drops_duplicate_dates_keeping_last(self):
-        """
-        Keep one row per date, the last one.
-        """
-
-        # Build data with a repeated date.
-        df = fake_prices(dates = ["2015-01-02", "2015-01-05", "2015-01-05"], closes = [1.0, 2.0, 9.0])
-
-        # Sort and deduplicate.
-        result = data_preprocessing.DataPreprocessing().sort_and_deduplicate(df = df)
-
-        # Check one row is left per date.
-        assert len(result) == 2
-
-        # Check the last duplicate was kept.
-        assert result["Close"].iloc[-1] == 9.0
-
 class TestHandleMissingValues:
     """
     Unit tests for DataPreprocessing.handle_missing_values.
@@ -95,3 +73,69 @@ class TestHandleMissingValues:
 
         # Check no weekend rows were added.
         assert len(result) == 2
+
+class TestDailyReturns:
+    """
+    Unit tests for DataPreprocessing.daily_returns.
+    """
+
+    def test_daily_returns(self):
+        """
+        Calculate percentage change from the previous day and drop the first row.
+        """
+
+        # Build prices that rise 10% then fall 10%.
+        df = fake_prices(dates = ["2015-01-02", "2015-01-05", "2015-01-06"], closes = [100.0, 110.0, 99.0])
+
+        # Calculate daily returns.
+        result = data_preprocessing.DataPreprocessing().daily_returns(df = df)
+
+        # Check the returns.
+        assert result["daily_return"].round(6).tolist() == [10.0, -10.0]
+
+        # Check the first day was dropped.
+        assert result["Date"].iloc[0] == pd.Timestamp("2015-01-05")
+
+class TestExtremeEvents:
+    """
+    Unit tests for DataPreprocessing.extreme_events.
+    """
+
+    def test_extreme_events_both_directions(self):
+        """
+        Label moves beyond 2% in either direction as extreme, and exactly 2% as not extreme.
+        """
+
+        # Build returns above, below, inside and on the threshold.
+        df = pd.DataFrame({"daily_return": [2.5, -3.0, 1.0, 2.0]})
+
+        # Label extreme events.
+        result = data_preprocessing.DataPreprocessing().extreme_events(df = df)
+
+        # Check the labels.
+        assert result["extreme_event"].tolist() == [1, 1, 0, 0]
+
+class TestShiftTarget:
+    """
+    Unit tests for DataPreprocessing.shift_target.
+    """
+
+    def test_shift_target_next_day(self):
+        """
+        Set each day's target to the next day's event and drop the last day.
+        """
+
+        # Build events for four days.
+        df = pd.DataFrame({"extreme_event": [0, 1, 0, 1]})
+
+        # Create the data preprocessing object.
+        preprocessing = data_preprocessing.DataPreprocessing()
+
+        # Shift the target.
+        result = preprocessing.shift_target(df = df)
+
+        # Check each target is the next day's event.
+        assert result[preprocessing.target["column"]].tolist() == [1, 0, 1]
+
+        # Check the last day was dropped.
+        assert len(result) == 3

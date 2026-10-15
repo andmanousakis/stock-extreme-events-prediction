@@ -2,16 +2,12 @@ import importlib
 import joblib
 import pandas as pd
 import pytest
-import torch
-from src.networks.temporal_cnn import TemporalCNNNetwork
-from utils.windowing import Windowing
 
 data_retrieval = importlib.import_module("src.1_data_retrieval")
 data_preprocessing = importlib.import_module("src.2_data_preprocessing")
 feature_engineering = importlib.import_module("src.3_feature_engineering")
 data_split = importlib.import_module("src.4_data_split")
-random_forest = importlib.import_module("src.5_random_forest")
-temporal_cnn = importlib.import_module("src.6_temporal_cnn")
+model_selection = importlib.import_module("src.5_model_selection")
 
 @pytest.mark.integration
 class TestPipelineIntegration:
@@ -22,7 +18,7 @@ class TestPipelineIntegration:
     def test_full_pipeline(self, workdir):
         """
         Run every step on real data, check each step reads the previous step's output, the target is the next day's event,
-        the split is time-ordered without overlap or loss, and both saved models predict on the real test days.
+        the split is time-ordered without overlap or loss, and the best saved model predicts on the real test days.
 
         Args:
             workdir (Path): Temporary folder all steps write to.
@@ -33,8 +29,7 @@ class TestPipelineIntegration:
         preprocessing = data_preprocessing.DataPreprocessing()
         engineering = feature_engineering.FeatureEngineering()
         splitter = data_split.DataSplit()
-        forest = random_forest.RandomForest()
-        cnn = temporal_cnn.TemporalCNN()
+        selection = model_selection.ModelSelection()
 
         # Check preprocessing reads the file retrieval writes.
         assert preprocessing.input["raw_data"] == retrieval.output["raw_data"]
@@ -45,29 +40,29 @@ class TestPipelineIntegration:
         # Check the split reads the file feature engineering writes.
         assert splitter.input["features"] == engineering.output["features"]
 
-        # Check both models read the files the split writes.
-        assert all(model.input[name] == splitter.output[name] for model in (forest, cnn) for name in ("train", "val", "test"))
+        # Check model selection reads the files the split writes.
+        assert all(selection.input[name] == splitter.output[name] for name in ("train", "val", "test"))
 
         # Check every step uses the same target column.
-        assert engineering.target["column"] == splitter.target["column"] == forest.target["column"] == cnn.target["column"]
+        assert preprocessing.target["column"] == engineering.target["column"] == splitter.target["column"] == selection.target["column"]
 
         # Run every step in order.
-        for step in (retrieval, preprocessing, engineering, splitter, forest, cnn):
+        for step in (retrieval, preprocessing, engineering, splitter, selection):
 
             # Run the step.
             step.pipeline()
 
-        # Read the clean data.
-        clean = pd.read_excel(workdir / engineering.input["clean_data"])
+        # Read the raw data.
+        raw = pd.read_excel(workdir / preprocessing.input["raw_data"])
 
         # Read the feature dataset.
         features = pd.read_excel(workdir / engineering.output["features"])
 
-        # Recalculate each day's extreme event from the clean data.
-        events = (clean[engineering.daily_returns_config["price_column"]].pct_change().mul(100).abs() > engineering.extreme_events_config["threshold"]).astype(int)
+        # Recalculate each day's extreme event from the raw data.
+        events = (raw[preprocessing.daily_returns_config["price_column"]].pct_change().mul(100).abs() > preprocessing.extreme_events_config["threshold"]).astype(int)
 
         # Pair each date with the next day's extreme event.
-        expected = pd.Series(events.shift(-1).to_numpy(), index = clean["Date"])
+        expected = pd.Series(events.shift(-1).to_numpy(), index = raw["Date"])
 
         # Check each target is the next day's extreme event.
         assert features[engineering.target["column"]].tolist() == expected.loc[features["Date"]].astype(int).tolist()
@@ -81,29 +76,14 @@ class TestPipelineIntegration:
         # Check the splits put back together equal the feature dataset.
         assert pd.concat(splits.values(), ignore_index = True).equals(features)
 
-        # Load the random forest.
-        rf = joblib.load(workdir / forest.output["model"])
+        # Load the best model.
+        best = joblib.load(workdir / selection.output["best_model"])
 
-        # Build the random forest's test windows.
-        rf_test = Windowing(window = rf["window"]).build(splits = splits, features = rf["features"], target = forest.target["column"])["test"]
+        # Check the best model predicts once per test day.
+        assert len(best.predict(splits = splits)["test"]["pred"]) == len(splits["test"])
 
-        # Check the random forest predicts once per test day.
-        assert len(rf["model"].predict(rf_test["X"].reshape(len(rf_test["X"]), -1))) == len(splits["test"])
+        # Read the evaluation report.
+        report = pd.read_csv(workdir / selection.output["report"])
 
-        # Load the temporal CNN.
-        tcnn = joblib.load(workdir / cnn.output["model"])
-
-        # Rebuild the network with its saved weights.
-        network = TemporalCNNNetwork(num_features = len(tcnn["features"]), window = tcnn["window"], **tcnn["network"])
-
-        # Load the saved weights.
-        network.load_state_dict(tcnn["state_dict"])
-
-        # Scale the splits with the saved scaler.
-        scaled = {name: df.assign(**dict(zip(tcnn["features"], tcnn["scaler"].transform(df[tcnn["features"]]).T))) for name, df in splits.items()}
-
-        # Build the temporal CNN's test windows shaped [samples, features, days].
-        cnn_test = Windowing(window = tcnn["window"]).build(splits = scaled, features = tcnn["features"], target = cnn.target["column"])["test"]["X"].transpose(0, 2, 1)
-
-        # Check the temporal CNN predicts once per test day.
-        assert network.predict_proba(torch.tensor(cnn_test, dtype = torch.float32)).shape == (len(splits["test"]), 2)
+        # Check every configured model and split was scored.
+        assert set(selection.models_config) <= set(report["model"]) and set(report["split"]) == {"train", "val", "test"}

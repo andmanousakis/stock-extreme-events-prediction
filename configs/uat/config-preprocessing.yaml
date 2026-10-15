@@ -5,5 +5,15 @@ input:
 missing_values:
   columns: [Adj Close, Close, High, Low, Open, Volume]
 
+daily_returns:
+  price_column: Adj Close
+
+extreme_events:
+  threshold: 2
+
+target:
+  column: extreme_event_next_day
+  shift: 1
+
 output:
   clean_data: data/interim/apple_stock_clean.xlsx

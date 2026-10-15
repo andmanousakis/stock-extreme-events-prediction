@@ -249,8 +249,9 @@ jobs:
           cp logs/pipeline.log logs/split.log
           gh release upload "$TAG" data/processed/splits/train.xlsx data/processed/splits/val.xlsx data/processed/splits/test.xlsx logs/split.log --repo "${{ github.repository }}"
 
-  # Random forest: train and tune on the splits from the release and add the trained model to the same release.
-  random-forest:
+  # Model selection: train every configured model on the splits from the release, score them and the baselines on train, val and test,
+  # keep the best by validation F1, and add the models and evaluation report to the same release.
+  model-selection:
     needs: [retrieve, split]
     runs-on: ubuntu-24.04
     # Allow uploading release files and pulling the image.
@@ -261,6 +262,10 @@ jobs:
       # Release created by the retrieve job.
       TAG: ${{ needs.retrieve.outputs.tag }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # MLflow tracking server on DagsHub.
+      MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+      MLFLOW_TRACKING_USERNAME: ${{ secrets.MLFLOW_TRACKING_USERNAME }}
+      MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
     steps:
       # Log in to GitHub Container Registry.
       - name: Log in to GHCR
@@ -274,124 +279,11 @@ jobs:
       - name: Download splits
         run: gh release download "$TAG" --pattern train.xlsx --pattern val.xlsx --pattern test.xlsx --dir data/processed/splits --repo "${{ github.repository }}"
 
-      # Train the random forest with the target environment's configs, writing data/, models/ and logs/ to the runner through mounted folders.
-      - name: Train random forest
-        run: |
-          mkdir -p models logs
-          docker run --rm -e APP_ENV=${{ env.APP_ENV }} -u $(id -u):$(id -g) -v "$PWD/data":/app/data -v "$PWD/models":/app/models -v "$PWD/logs":/app/logs ${{ env.IMAGE }}:${{ github.sha }} python -m src.5_random_forest
-
-      # Add the trained model and training log to the release.
-      - name: Upload model
-        run: |
-          cp logs/pipeline.log logs/random_forest.log
-          gh release upload "$TAG" models/random_forest.joblib logs/random_forest.log --repo "${{ github.repository }}"
-
-  # Temporal CNN: train on the splits from the release with early stopping and add the trained model to the same release. Runs in parallel with random-forest.
-  temporal-cnn:
-    needs: [retrieve, split]
-    runs-on: ubuntu-24.04
-    # Allow uploading release files and pulling the image.
-    permissions:
-      contents: write
-      packages: read
-    env:
-      # Release created by the retrieve job.
-      TAG: ${{ needs.retrieve.outputs.tag }}
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    steps:
-      # Log in to GitHub Container Registry.
-      - name: Log in to GHCR
-        uses: docker/login-action@v4.6.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      # Download the train, val and test sets from the release.
-      - name: Download splits
-        run: gh release download "$TAG" --pattern train.xlsx --pattern val.xlsx --pattern test.xlsx --dir data/processed/splits --repo "${{ github.repository }}"
-
-      # Train the temporal CNN with the target environment's configs, writing data/, models/ and logs/ to the runner through mounted folders.
-      - name: Train temporal CNN
-        run: |
-          mkdir -p models logs
-          docker run --rm -e APP_ENV=${{ env.APP_ENV }} -u $(id -u):$(id -g) -v "$PWD/data":/app/data -v "$PWD/models":/app/models -v "$PWD/logs":/app/logs ${{ env.IMAGE }}:${{ github.sha }} python -m src.6_temporal_cnn
-
-      # Add the trained model and training log to the release.
-      - name: Upload model
-        run: |
-          cp logs/pipeline.log logs/temporal_cnn.log
-          gh release upload "$TAG" models/temporal_cnn.joblib logs/temporal_cnn.log --repo "${{ github.repository }}"
-
-  # Improvement: train the temporal CNN experiments on the splits from the release, keep the best by validation F1, and add it with the comparison table to the same release. Runs in parallel with the two models.
-  improvement:
-    needs: [retrieve, split]
-    runs-on: ubuntu-24.04
-    # Allow uploading release files and pulling the image.
-    permissions:
-      contents: write
-      packages: read
-    env:
-      # Release created by the retrieve job.
-      TAG: ${{ needs.retrieve.outputs.tag }}
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    steps:
-      # Log in to GitHub Container Registry.
-      - name: Log in to GHCR
-        uses: docker/login-action@v4.6.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      # Download the train, val and test sets from the release.
-      - name: Download splits
-        run: gh release download "$TAG" --pattern train.xlsx --pattern val.xlsx --pattern test.xlsx --dir data/processed/splits --repo "${{ github.repository }}"
-
-      # Run the experiments with the target environment's configs, writing data/, models/, reports/ and logs/ to the runner through mounted folders.
-      - name: Run improvement experiments
+      # Run model selection with the target environment's configs and MLflow credentials, writing data/, models/, reports/ and logs/ to the runner through mounted folders.
+      - name: Run model selection
         run: |
           mkdir -p models reports logs
-          docker run --rm -e APP_ENV=${{ env.APP_ENV }} -u $(id -u):$(id -g) -v "$PWD/data":/app/data -v "$PWD/models":/app/models -v "$PWD/reports":/app/reports -v "$PWD/logs":/app/logs ${{ env.IMAGE }}:${{ github.sha }} python -m src.7_improvement
-
-      # Add the improved model, comparison table and log to the release.
-      - name: Upload improved model
-        run: |
-          cp logs/pipeline.log logs/improvement.log
-          gh release upload "$TAG" models/temporal_cnn_improved.joblib reports/improvement_results.csv logs/improvement.log --repo "${{ github.repository }}"
-
-  # Model evaluation: score the three saved models and the simple baselines on the test set and add the report to the same release.
-  evaluation:
-    needs: [retrieve, random-forest, temporal-cnn, improvement]
-    runs-on: ubuntu-24.04
-    # Allow uploading release files and pulling the image.
-    permissions:
-      contents: write
-      packages: read
-    env:
-      # Release created by the retrieve job.
-      TAG: ${{ needs.retrieve.outputs.tag }}
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    steps:
-      # Log in to GitHub Container Registry.
-      - name: Log in to GHCR
-        uses: docker/login-action@v4.6.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      # Download the splits and the three trained models from the release.
-      - name: Download splits and models
-        run: |
-          gh release download "$TAG" --pattern train.xlsx --pattern val.xlsx --pattern test.xlsx --dir data/processed/splits --repo "${{ github.repository }}"
-          gh release download "$TAG" --pattern random_forest.joblib --pattern temporal_cnn.joblib --pattern temporal_cnn_improved.joblib --dir models --repo "${{ github.repository }}"
-
-      # Run the evaluation with the target environment's configs, writing reports/ and logs/ to the runner through mounted folders.
-      - name: Run model evaluation
-        run: |
-          mkdir -p reports logs
-          docker run --rm -e APP_ENV=${{ env.APP_ENV }} -u $(id -u):$(id -g) -v "$PWD/data":/app/data -v "$PWD/models":/app/models -v "$PWD/reports":/app/reports -v "$PWD/logs":/app/logs ${{ env.IMAGE }}:${{ github.sha }} python -m src.8_model_evaluation
+          docker run --rm -e APP_ENV=${{ env.APP_ENV }} -e MLFLOW_TRACKING_URI -e MLFLOW_TRACKING_USERNAME -e MLFLOW_TRACKING_PASSWORD -e GITHUB_REF_NAME -e GITHUB_SHA -u $(id -u):$(id -g) -v "$PWD/data":/app/data -v "$PWD/models":/app/models -v "$PWD/reports":/app/reports -v "$PWD/logs":/app/logs ${{ env.IMAGE }}:${{ github.sha }} python -m src.5_model_selection
 
       # Show the test-set comparison on the workflow run page.
       - name: Write job summary
@@ -399,13 +291,13 @@ jobs:
           python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
           import csv
           rows = sorted((r for r in csv.DictReader(open("reports/evaluation.csv")) if r["split"] == "test"), key = lambda r: -float(r["f1"]))
-          print("### Test set results\n\n| Model | F1 | Precision | Recall | Accuracy |\n|---|---|---|---|---|")
+          print("### Test set results\n\n| Model | F1 | Precision | Recall | MCC | ROC AUC | Accuracy |\n|---|---|---|---|---|---|---|")
           for r in rows:
-              print(f"| {r['model']} | {float(r['f1']):.3f} | {float(r['precision']):.3f} | {float(r['recall']):.3f} | {float(r['accuracy']):.3f} |")
+              print(f"| {r['model']} | {float(r['f1']):.3f} | {float(r['precision']):.3f} | {float(r['recall']):.3f} | {float(r['mcc']):.3f} | {float(r['roc_auc']):.3f} | {float(r['accuracy']):.3f} |")
           PY
 
-      # Add the evaluation report and log to the release.
-      - name: Upload evaluation report
+      # Add the trained models, evaluation report and log to the release.
+      - name: Upload models and report
         run: |
-          cp logs/pipeline.log logs/evaluation.log
-          gh release upload "$TAG" reports/evaluation.csv logs/evaluation.log --repo "${{ github.repository }}"
+          cp logs/pipeline.log logs/model_selection.log
+          gh release upload "$TAG" models/*.joblib reports/evaluation.csv logs/model_selection.log --repo "${{ github.repository }}"

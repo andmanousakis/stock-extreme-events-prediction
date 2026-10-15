@@ -1,7 +1,7 @@
 request:
   symbol: AAPL
-  start: "2015-01-01"
-  end: "2024-01-01"
+  start: "2005-01-01"
+  end: null
   max_retries: 5
   base_delay: 2
   max_delay: 30
