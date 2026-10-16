@@ -1,6 +1,6 @@
 request:
   symbol: AAPL
-  start: "2005-01-01"
+  start: "1990-01-01"
   end: null
   max_retries: 5
   base_delay: 2
@@ -8,4 +8,4 @@ request:
   schema: raw_stock
 
 output:
-  raw_data: data/raw/apple_stock_raw.xlsx
+  raw_data: raw/apple_stock

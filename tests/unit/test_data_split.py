@@ -2,7 +2,7 @@ import importlib
 import pandas as pd
 import pytest
 
-data_split = importlib.import_module("src.4_data_split")
+data_split = importlib.import_module("src.pipeline.4_data_split")
 
 def fake_features(n: int = 20) -> pd.DataFrame:
     """

@@ -1,44 +1,42 @@
+import os
+from datetime import datetime, timezone
 from pathlib import Path
 import joblib
 import numpy as np
 import pandas as pd
 from sklearn.metrics import accuracy_score, f1_score, matthews_corrcoef, precision_score, recall_score, roc_auc_score
 from src.mlops.mlflow_tracker import MlflowTracker
-from src.models.random_forest import RandomForestModel
 from src.models.temporal_cnn import TemporalCNNModel
 from utils.config_loader import ConfigLoader
+from utils.storage_io import StorageIO
 from utils.error_handler import log_step
 from utils.logger import Logger
 
-class ModelSelection:
+class ModelTrainingEvaluation:
     """
-    Train every configured model, score it on train, val and test,
-    and keep the best by validation score. Test is only reported, never used to choose.
-    When an MLflow server is configured, every model is logged as a run and the best is registered.
+    Train every configured model, score it on train, val and test, save it, log it to MLflow,
+    and write its metrics and predictions to Parquet tables tagged with the pipeline run.
     """
 
     # Model classes the config can refer to by name.
-    MODEL_CLASSES = {"RandomForestModel": RandomForestModel, "TemporalCNNModel": TemporalCNNModel}
+    MODEL_CLASSES = {"TemporalCNNModel": TemporalCNNModel}
 
     def __init__(self):
         """
-        Create the logger and load the model selection configs.
+        Create the logger, load the training and evaluation configs, and identify the pipeline run.
         """
 
         # Create a logger named after the class.
         self.logger = Logger().get_logger(self.__class__.__name__)
 
         # Load configs.
-        self.config = ConfigLoader().load("config-model-selection")
+        self.config = ConfigLoader().load("config-model-training-eval")
 
         # Get the input configs.
         self.input = self.config["input"]
 
         # Get the target configs.
         self.target = self.config["target"]
-
-        # Get the metric used to pick the best model.
-        self.selection_metric = self.config["selection_metric"]
 
         # Get the model configs.
         self.models_config = self.config["models"]
@@ -49,6 +47,15 @@ class ModelSelection:
         # Create the MLflow tracker from the tracking configs.
         self.tracker = MlflowTracker(**self.config["tracking"])
 
+        # Create the table storage.
+        self.storage = StorageIO()
+
+        # Get the run start time in UTC.
+        self.run_date = datetime.now(timezone.utc)
+
+        # Use the CI run ID if given, otherwise a local one from the start time.
+        self.run_id = os.environ.get("PIPELINE_RUN_ID") or self.run_date.strftime("local-%Y%m%dT%H%M%S")
+
     @log_step("Load splits")
     def load_splits(self) -> dict:
         """
@@ -58,8 +65,8 @@ class ModelSelection:
             dict: 'train', 'val' and 'test' DataFrames.
         """
 
-        # Load each split.
-        return {name: pd.read_excel(self.input[name]) for name in ("train", "val", "test")}
+        # Read each split table.
+        return {name: self.storage.read(table = self.input[name]) for name in ("train", "val", "test")}
 
     @log_step("Build models")
     def build_models(self) -> dict:
@@ -92,11 +99,8 @@ class ModelSelection:
             # Train the model.
             model.fit(splits = splits)
 
-            # Describe what training chose: the forest's settings or the network's best epoch.
-            chosen = f"params {model.best_params}" if isinstance(model, RandomForestModel) else f"best epoch {model.best_epoch} of {len(model.history)}"
-
             # Log the training outcome.
-            self.logger.info(f"{name}: {chosen}, threshold {model.threshold:.2f}.")
+            self.logger.info(f"{name}: best epoch {model.best_epoch} of {len(model.history)}, threshold {model.threshold:.2f}.")
 
         # Return the trained models.
         return models
@@ -157,52 +161,26 @@ class ModelSelection:
         # Return the table.
         return pd.DataFrame(rows)
 
-    @log_step("Select best")
-    def select_best(self, table: pd.DataFrame = None, models: dict = None) -> str:
-        """
-        Pick the model with the best validation score. Test scores are not considered.
-
-        Args:
-            table (pd.DataFrame): One row per model and split.
-            models (dict): Model name to trained model.
-
-        Returns:
-            str: Name of the best model.
-        """
-
-        # Get the trained models' validation rows.
-        val = table[(table["split"] == "val") & (table["model"].isin(models))]
-
-        # Pick the best validation score.
-        best = val.sort_values(self.selection_metric, ascending = False).iloc[0]["model"]
-
-        # Log the choice.
-        self.logger.info(f"Best model by val {self.selection_metric}: {best}.")
-
-        # Return the best model's name.
-        return best
-
     @log_step("Report")
-    def report(self, table: pd.DataFrame = None, models: dict = None) -> pd.DataFrame:
+    def report(self, table: pd.DataFrame = None) -> pd.DataFrame:
         """
-        Log the test-set comparison, best first, and each trained model's F1 across splits to check for overfitting.
+        Log each model's test metrics and its F1 across splits to check for overfitting.
 
         Args:
             table (pd.DataFrame): One row per model and split.
-            models (dict): Model name to trained model.
 
         Returns:
             pd.DataFrame: The same table.
         """
 
-        # Log the test-set comparison, best F1 first.
+        # Log the test-set metrics, best F1 first.
         for row in table[table["split"] == "test"].sort_values("f1", ascending = False).itertuples():
 
             # Log the model's test metrics.
             self.logger.info(f"test  {row.model:<15} F1 {row.f1:.3f}, precision {row.precision:.3f}, recall {row.recall:.3f}, MCC {row.mcc:.3f}, ROC AUC {row.roc_auc:.3f}, accuracy {row.accuracy:.3f}.")
 
-        # Log each trained model's F1 across splits.
-        for name in models:
+        # Log each model's F1 across splits.
+        for name in self.models_config:
 
             # Get the model's F1 per split.
             f1 = table[table["model"] == name].set_index("split")["f1"]
@@ -213,18 +191,16 @@ class ModelSelection:
         # Return the table.
         return table
 
-    @log_step("Save results")
-    def save(self, models: dict = None, best: str = None, table: pd.DataFrame = None) -> pd.DataFrame:
+    @log_step("Save models")
+    def save_models(self, models: dict = None) -> dict:
         """
-        Save every trained model, a copy of the best one, and the evaluation table.
+        Save every trained model to <models_dir>/<name>.joblib.
 
         Args:
             models (dict): Model name to trained model.
-            best (str): Name of the best model.
-            table (pd.DataFrame): One row per model and split.
 
         Returns:
-            pd.DataFrame: The saved table.
+            dict: The saved models.
         """
 
         # Create the models directory if it does not exist.
@@ -236,17 +212,8 @@ class ModelSelection:
             # Save the model.
             joblib.dump(model, Path(self.output["models_dir"]) / f"{name}.joblib")
 
-        # Save the best model.
-        joblib.dump(models[best], self.output["best_model"])
-
-        # Create the report directory if it does not exist.
-        Path(self.output["report"]).parent.mkdir(parents = True, exist_ok = True)
-
-        # Store the evaluation table.
-        table.to_csv(self.output["report"], index = False)
-
-        # Return the table.
-        return table
+        # Return the models.
+        return models
 
     @log_step("MLflow tracking")
     def track(self, models: dict = None, predictions: dict = None, table: pd.DataFrame = None) -> dict:
@@ -259,7 +226,7 @@ class ModelSelection:
             table (pd.DataFrame): One row per model and split.
 
         Returns:
-            dict: Model name to its logged model URI, empty when tracking is off.
+            dict: Model name to its 'mlflow_run_id' and 'model_uri', empty when tracking is off.
         """
 
         # Skip tracking without a tracking server.
@@ -272,46 +239,65 @@ class ModelSelection:
             return {}
 
         # Log the models.
-        uris = self.tracker.log_models(models_config = self.models_config, models = models, predictions = predictions, table = table, models_dir = self.output["models_dir"])
+        runs = self.tracker.log_models(models_config = self.models_config, models = models, predictions = predictions, table = table, models_dir = self.output["models_dir"])
 
         # Log how many runs were logged.
-        self.logger.info(f"Logged {len(uris)} runs to experiment '{self.tracker.experiment}'.")
+        self.logger.info(f"Logged {len(runs)} runs to experiment '{self.tracker.experiment}'.")
 
-        # Return the logged model URIs.
-        return uris
+        # Return the runs.
+        return runs
 
-    @log_step("MLflow registration")
-    def register(self, best: str = None, uris: dict = None, table: pd.DataFrame = None) -> dict:
+    def run_columns(self, model: str = None, runs: dict = None) -> dict:
         """
-        Register the best model and move the environment's alias. Skipped when tracking is off.
+        Build the columns that tie a table row to this pipeline run and the model's MLflow run.
 
         Args:
-            best (str): Name of the best model.
-            uris (dict): Model name to its logged model URI.
-            table (pd.DataFrame): One row per model and split.
+            model (str): Model name.
+            runs (dict): Model name to its 'mlflow_run_id' and 'model_uri'; empty when tracking is off.
 
         Returns:
-            dict: The registered version and whether the alias moved, empty when tracking is off.
+            dict: 'run_id', 'run_date', 'mlflow_run_id' and 'model_uri'.
         """
 
-        # Skip registration without tracking.
-        if not uris:
+        # Get the model's MLflow run, if it was tracked.
+        run = runs.get(model, {})
 
-            # Return nothing registered.
-            return {}
+        # Return the run columns.
+        return {"run_id": self.run_id, "run_date": self.run_date, "mlflow_run_id": run.get("mlflow_run_id", ""), "model_uri": run.get("model_uri", "")}
 
-        # Register the best model.
-        result = self.tracker.register_best(best = best, uris = uris, table = table)
+    @log_step("Write tables")
+    def write_tables(self, table: pd.DataFrame = None, predictions: dict = None, runs: dict = None) -> dict:
+        """
+        Write this run's metrics and predictions to their Parquet tables, tagged with the run ID, run date,
+        and each model's MLflow run ID and model URI.
 
-        # Log the outcome.
-        self.logger.info(f"Registered {self.tracker.registered_model} version {result['version']} ({best}); alias '{self.tracker.env}' {'moved to it' if result['promoted'] else 'kept on the better existing version'}.")
+        Args:
+            table (pd.DataFrame): One row per model and split.
+            predictions (dict): Model name to its predictions per split.
+            runs (dict): Model name to its 'mlflow_run_id' and 'model_uri'.
 
-        # Return the outcome.
-        return result
+        Returns:
+            dict: Table name to its written file.
+        """
+
+        # Add the run columns to the metrics.
+        metrics = pd.concat([table[table["model"] == model].assign(**self.run_columns(model = model, runs = runs)) for model in table["model"].unique()], ignore_index = True)
+
+        # Build one prediction row per model, split and day, with the run columns.
+        rows = pd.concat([pd.DataFrame({"model": model, "split": split, "date": data["dates"], "y": data["y"], "proba": data["proba"], "pred": data["pred"]}).assign(**self.run_columns(model = model, runs = runs)) for model, splits in predictions.items() for split, data in splits.items()], ignore_index = True)
+
+        # Write this run's file of both tables.
+        written = {name: self.storage.write(df = df, table = self.output["tables"][name]) for name, df in (("metrics", metrics), ("predictions", rows))}
+
+        # Log where they went.
+        self.logger.info(f"Run {self.run_id}: wrote {written['metrics']} and {written['predictions']}.")
+
+        # Return the written files.
+        return written
 
     def pipeline(self):
         """
-        Run the model selection steps in order.
+        Run the training and evaluation steps in order.
         """
 
         # Load the splits.
@@ -329,20 +315,17 @@ class ModelSelection:
         # Score everything.
         table = self.score(predictions = predictions)
 
-        # Pick the best model on val.
-        best = self.select_best(table = table, models = models)
+        # Log the results.
+        table = self.report(table = table)
 
-        # Log the comparison.
-        table = self.report(table = table, models = models)
-
-        # Save the models and report.
-        self.save(models = models, best = best, table = table)
+        # Save the models.
+        self.save_models(models = models)
 
         # Log every model to MLflow.
-        uris = self.track(models = models, predictions = predictions, table = table)
+        runs = self.track(models = models, predictions = predictions, table = table)
 
-        # Register the best model.
-        self.register(best = best, uris = uris, table = table)
+        # Write the metrics and predictions tables.
+        self.write_tables(table = table, predictions = predictions, runs = runs)
 
     @classmethod
     def run(cls):
@@ -358,5 +341,5 @@ class ModelSelection:
 
 if __name__ == "__main__":
 
-    # Run model selection.
-    ModelSelection.run()
+    # Run model training and evaluation.
+    ModelTrainingEvaluation.run()

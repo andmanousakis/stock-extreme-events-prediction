@@ -15,6 +15,14 @@ env:
   IMAGE: ghcr.io/andmanousakis/stock-extreme
   # Target environment from the branch: prod and uat branches map to themselves, every other branch to dev.
   APP_ENV: ${{ github.ref_name == 'prod' && 'prod' || github.ref_name == 'uat' && 'uat' || 'dev' }}
+  # Pipeline run ID written to the metrics and predictions tables: run number and attempt.
+  PIPELINE_RUN_ID: r${{ github.run_number }}.${{ github.run_attempt }}
+  # Table storage (DagsHub), used by every pipeline job.
+  STORAGE_BUCKET: ${{ secrets.STORAGE_BUCKET }}
+  AWS_ENDPOINT_URL: ${{ secrets.AWS_ENDPOINT_URL }}
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  AWS_REGION: ${{ secrets.AWS_REGION }}
 
 jobs:
   # CI: build the image and run the unit tests. Runs on every push and pull request.
@@ -95,7 +103,7 @@ jobs:
       - name: Run integration tests
         run: docker run --rm -e APP_ENV=${{ env.APP_ENV }} ${{ env.IMAGE }}:${{ github.sha }} python -m pytest -v -p no:cacheprovider -m integration
 
-  # Data retrieval: run retrieval in the published image and keep the raw data as a GitHub release.
+  # Data retrieval: write the raw data table and create the run's GitHub release for logs and models.
   retrieve:
     needs: integration
     runs-on: ubuntu-24.04
@@ -119,9 +127,9 @@ jobs:
       - name: Run data retrieval
         run: |
           mkdir -p data logs
-          docker run --rm -e APP_ENV=${{ env.APP_ENV }} -u $(id -u):$(id -g) -v "$PWD/data":/app/data -v "$PWD/logs":/app/logs ${{ env.IMAGE }}:${{ github.sha }} python -m src.1_data_retrieval
+          docker run --rm -e APP_ENV=${{ env.APP_ENV }} -e STORAGE_BUCKET -e AWS_ENDPOINT_URL -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_REGION -u $(id -u):$(id -g) -v "$PWD/data":/app/data -v "$PWD/logs":/app/logs ${{ env.IMAGE }}:${{ github.sha }} python -m src.pipeline.1_data_retrieval
 
-      # Publish the raw data and retrieval log as a release tagged data-<environment>-<date>-<short sha>-r<run number>.<attempt>, unique per run and re-run.
+      # Create the run's release with the retrieval log, tagged tagged data-<environment>-<date>-<short sha>-r<run number>.<attempt>, unique per run and re-run.
       - name: Create data release
         id: release
         env:
@@ -131,14 +139,14 @@ jobs:
           RUN="r${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
           TAG="data-${APP_ENV}-${DATE}-${GITHUB_SHA::7}-${RUN}"
           cp logs/pipeline.log logs/retrieval.log
-          gh release create "$TAG" data/raw/apple_stock_raw.xlsx logs/retrieval.log \
+          gh release create "$TAG" logs/retrieval.log \
             --repo "${{ github.repository }}" \
             --target "${{ github.sha }}" \
             --title "${APP_ENV^} data — ${DATE} (${GITHUB_SHA::7}, run ${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT})" \
             --notes "AAPL data for ${APP_ENV}, produced by commit ${{ github.sha }} on branch ${{ github.ref_name }}."
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
-  # Data preprocessing: clean the raw data from the retrieve release and add the clean data to the same release.
+  # Data preprocessing: clean and label the raw data table into the clean data table.
   preprocess:
     needs: retrieve
     runs-on: ubuntu-24.04
@@ -159,23 +167,19 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Download the raw data from the retrieve release.
-      - name: Download raw data
-        run: gh release download "$TAG" --pattern apple_stock_raw.xlsx --dir data/raw --repo "${{ github.repository }}"
-
       # Run data preprocessing with the target environment's configs, writing data/ and logs/ to the runner through mounted folders.
       - name: Run data preprocessing
         run: |
           mkdir -p logs
-          docker run --rm -e APP_ENV=${{ env.APP_ENV }} -u $(id -u):$(id -g) -v "$PWD/data":/app/data -v "$PWD/logs":/app/logs ${{ env.IMAGE }}:${{ github.sha }} python -m src.2_data_preprocessing
+          docker run --rm -e APP_ENV=${{ env.APP_ENV }} -e STORAGE_BUCKET -e AWS_ENDPOINT_URL -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_REGION -u $(id -u):$(id -g) -v "$PWD/data":/app/data -v "$PWD/logs":/app/logs ${{ env.IMAGE }}:${{ github.sha }} python -m src.pipeline.2_data_preprocessing
 
       # Add the clean data and preprocessing log to the release.
       - name: Upload clean data
         run: |
           cp logs/pipeline.log logs/preprocessing.log
-          gh release upload "$TAG" data/interim/apple_stock_clean.xlsx logs/preprocessing.log --repo "${{ github.repository }}"
+          gh release upload "$TAG" logs/preprocessing.log --repo "${{ github.repository }}"
 
-  # Feature engineering: build features from the clean data in the release and add the feature dataset to the same release.
+  # Feature engineering: build the feature table from the clean data table.
   features:
     needs: [retrieve, preprocess]
     runs-on: ubuntu-24.04
@@ -196,23 +200,19 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Download the clean data from the release.
-      - name: Download clean data
-        run: gh release download "$TAG" --pattern apple_stock_clean.xlsx --dir data/interim --repo "${{ github.repository }}"
-
       # Run feature engineering with the target environment's configs, writing data/ and logs/ to the runner through mounted folders.
       - name: Run feature engineering
         run: |
           mkdir -p logs
-          docker run --rm -e APP_ENV=${{ env.APP_ENV }} -u $(id -u):$(id -g) -v "$PWD/data":/app/data -v "$PWD/logs":/app/logs ${{ env.IMAGE }}:${{ github.sha }} python -m src.3_feature_engineering
+          docker run --rm -e APP_ENV=${{ env.APP_ENV }} -e STORAGE_BUCKET -e AWS_ENDPOINT_URL -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_REGION -u $(id -u):$(id -g) -v "$PWD/data":/app/data -v "$PWD/logs":/app/logs ${{ env.IMAGE }}:${{ github.sha }} python -m src.pipeline.3_feature_engineering
 
       # Add the feature dataset and feature engineering log to the release.
       - name: Upload features
         run: |
           cp logs/pipeline.log logs/features.log
-          gh release upload "$TAG" data/processed/apple_stock_features.xlsx logs/features.log --repo "${{ github.repository }}"
+          gh release upload "$TAG" logs/features.log --repo "${{ github.repository }}"
 
-  # Data split: split the feature dataset from the release in time order and add the train, val and test sets to the same release.
+  # Data split: split the feature table in time order into the train, val and test tables.
   split:
     needs: [retrieve, features]
     runs-on: ubuntu-24.04
@@ -233,25 +233,21 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Download the feature dataset from the release.
-      - name: Download features
-        run: gh release download "$TAG" --pattern apple_stock_features.xlsx --dir data/processed --repo "${{ github.repository }}"
-
       # Run the data split with the target environment's configs, writing data/ and logs/ to the runner through mounted folders.
       - name: Run data split
         run: |
           mkdir -p logs
-          docker run --rm -e APP_ENV=${{ env.APP_ENV }} -u $(id -u):$(id -g) -v "$PWD/data":/app/data -v "$PWD/logs":/app/logs ${{ env.IMAGE }}:${{ github.sha }} python -m src.4_data_split
+          docker run --rm -e APP_ENV=${{ env.APP_ENV }} -e STORAGE_BUCKET -e AWS_ENDPOINT_URL -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_REGION -u $(id -u):$(id -g) -v "$PWD/data":/app/data -v "$PWD/logs":/app/logs ${{ env.IMAGE }}:${{ github.sha }} python -m src.pipeline.4_data_split
 
       # Add the train, val and test sets and the split log to the release.
       - name: Upload splits
         run: |
           cp logs/pipeline.log logs/split.log
-          gh release upload "$TAG" data/processed/splits/train.xlsx data/processed/splits/val.xlsx data/processed/splits/test.xlsx logs/split.log --repo "${{ github.repository }}"
+          gh release upload "$TAG" logs/split.log --repo "${{ github.repository }}"
 
-  # Model selection: train every configured model on the splits from the release, score them and the baselines on train, val and test,
-  # keep the best by validation F1, and add the models and evaluation report to the same release.
-  model-selection:
+  # Training and evaluation: train every configured model on the splits from the release, score it on train, val and test,
+  # log it to MLflow, write its metrics and predictions tables, and add the models to the same release.
+  training-evaluation:
     needs: [retrieve, split]
     runs-on: ubuntu-24.04
     # Allow uploading release files and pulling the image.
@@ -275,29 +271,68 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Download the train, val and test sets from the release.
-      - name: Download splits
-        run: gh release download "$TAG" --pattern train.xlsx --pattern val.xlsx --pattern test.xlsx --dir data/processed/splits --repo "${{ github.repository }}"
-
-      # Run model selection with the target environment's configs and MLflow credentials, writing data/, models/, reports/ and logs/ to the runner through mounted folders.
-      - name: Run model selection
+      # Train and evaluate with the target environment's configs and the MLflow and storage credentials, writing data/, models/ and logs/ to the runner.
+      - name: Train and evaluate models
         run: |
-          mkdir -p models reports logs
-          docker run --rm -e APP_ENV=${{ env.APP_ENV }} -e MLFLOW_TRACKING_URI -e MLFLOW_TRACKING_USERNAME -e MLFLOW_TRACKING_PASSWORD -e GITHUB_REF_NAME -e GITHUB_SHA -u $(id -u):$(id -g) -v "$PWD/data":/app/data -v "$PWD/models":/app/models -v "$PWD/reports":/app/reports -v "$PWD/logs":/app/logs ${{ env.IMAGE }}:${{ github.sha }} python -m src.5_model_selection
+          mkdir -p models logs
+          docker run --rm -e APP_ENV=${{ env.APP_ENV }} -e PIPELINE_RUN_ID -e MLFLOW_TRACKING_URI -e MLFLOW_TRACKING_USERNAME -e MLFLOW_TRACKING_PASSWORD -e STORAGE_BUCKET -e AWS_ENDPOINT_URL -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_REGION -e GITHUB_REF_NAME -e GITHUB_SHA -u $(id -u):$(id -g) -v "$PWD/data":/app/data -v "$PWD/models":/app/models -v "$PWD/logs":/app/logs ${{ env.IMAGE }}:${{ github.sha }} python -m src.pipeline.5_model_training_evaluation
 
-      # Show the test-set comparison on the workflow run page.
+      # Show this run's test metrics from the metrics table on the workflow run page.
       - name: Write job summary
         run: |
-          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
-          import csv
-          rows = sorted((r for r in csv.DictReader(open("reports/evaluation.csv")) if r["split"] == "test"), key = lambda r: -float(r["f1"]))
-          print("### Test set results\n\n| Model | F1 | Precision | Recall | MCC | ROC AUC | Accuracy |\n|---|---|---|---|---|---|---|")
-          for r in rows:
-              print(f"| {r['model']} | {float(r['f1']):.3f} | {float(r['precision']):.3f} | {float(r['recall']):.3f} | {float(r['mcc']):.3f} | {float(r['roc_auc']):.3f} | {float(r['accuracy']):.3f} |")
-          PY
+          docker run --rm -e APP_ENV=${{ env.APP_ENV }} -e PIPELINE_RUN_ID -e STORAGE_BUCKET -e AWS_ENDPOINT_URL -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_REGION ${{ env.IMAGE }}:${{ github.sha }} python -c "
+          import os
+          from utils.storage_io import StorageIO
+          m = StorageIO().read(table = 'evaluation/metrics', all_runs = True)
+          m = m[(m['run_id'] == os.environ['PIPELINE_RUN_ID']) & (m['split'] == 'test')].sort_values('f1', ascending = False)
+          print('### Test set results\\n\\n| Model | F1 | Precision | Recall | MCC | ROC AUC | Accuracy |\\n|---|---|---|---|---|---|---|')
+          [print(f'| {r.model} | {r.f1:.3f} | {r.precision:.3f} | {r.recall:.3f} | {r.mcc:.3f} | {r.roc_auc:.3f} | {r.accuracy:.3f} |') for r in m.itertuples()]
+          " >> "$GITHUB_STEP_SUMMARY"
 
-      # Add the trained models, evaluation report and log to the release.
-      - name: Upload models and report
+      # Add the trained models and log to the release.
+      - name: Upload models
+        run: |
+          cp logs/pipeline.log logs/training_evaluation.log
+          gh release upload "$TAG" models/*.joblib logs/training_evaluation.log --repo "${{ github.repository }}"
+
+  # Model selection: pick the best model of this run by validation score from the metrics table, register it in MLflow
+  # with the environment's alias, and add it to the same release.
+  model-selection:
+    needs: [retrieve, training-evaluation]
+    runs-on: ubuntu-24.04
+    # Allow uploading release files and pulling the image.
+    permissions:
+      contents: write
+      packages: read
+    env:
+      # Release created by the retrieve job.
+      TAG: ${{ needs.retrieve.outputs.tag }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # MLflow tracking server on DagsHub.
+      MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+      MLFLOW_TRACKING_USERNAME: ${{ secrets.MLFLOW_TRACKING_USERNAME }}
+      MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
+    steps:
+      # Log in to GitHub Container Registry.
+      - name: Log in to GHCR
+        uses: docker/login-action@v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Download the trained models from the release.
+      - name: Download models
+        run: gh release download "$TAG" --pattern "*.joblib" --dir models --repo "${{ github.repository }}"
+
+      # Select and register the best model with the target environment's configs and the MLflow and storage credentials.
+      - name: Select best model
+        run: |
+          mkdir -p logs
+          docker run --rm -e APP_ENV=${{ env.APP_ENV }} -e MLFLOW_TRACKING_URI -e MLFLOW_TRACKING_USERNAME -e MLFLOW_TRACKING_PASSWORD -e STORAGE_BUCKET -e AWS_ENDPOINT_URL -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_REGION -u $(id -u):$(id -g) -v "$PWD/models":/app/models -v "$PWD/logs":/app/logs ${{ env.IMAGE }}:${{ github.sha }} python -m src.pipeline.6_model_selection
+
+      # Add the best model and log to the release.
+      - name: Upload best model
         run: |
           cp logs/pipeline.log logs/model_selection.log
-          gh release upload "$TAG" models/*.joblib reports/evaluation.csv logs/model_selection.log --repo "${{ github.repository }}"
+          gh release upload "$TAG" models/best_model.joblib logs/model_selection.log --repo "${{ github.repository }}"

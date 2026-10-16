@@ -1,54 +1,12 @@
 input:
-  train: data/processed/splits/train.xlsx
-  val: data/processed/splits/val.xlsx
-  test: data/processed/splits/test.xlsx
+  metrics_table: evaluation/metrics
+  models_dir: models
 
-target:
-  column: extreme_event_next_day
-
-selection_metric: f1
-
-models:
-  random_forest:
-    class: RandomForestModel
-    params:
-      features: [Open, High, Low, Close, Volume, daily_return]
-      window: 10
-      random_state: 42
-      param_grid:
-        n_estimators: [100, 300]
-        max_depth: [3, 5, 10, null]
-        min_samples_leaf: [1, 5, 20]
-        class_weight: [null, balanced]
-
-  cnn_baseline:
-    class: TemporalCNNModel
-    params:
-      features: [Open, High, Low, Close, Volume, daily_return]
-      window: 10
-      network: TemporalCNNNetwork
-      channels: [32, 64]
-      dropout: 0.3
-
-  cnn_improved:
-    class: TemporalCNNModel
-    params:
-      features: [daily_return, volatility_5, volatility_10, volatility_20, range, gap, volume_ratio]
-      window: 10
-      network: TemporalCNNNetwork
-      channels: [8, 16]
-      dropout: 0.5
-      learning_rate: 0.0003
-      weight_decay: 0.0001
-      class_weights: true
-      tune_threshold: true
+selection_metric: mcc
 
 tracking:
-  experiment: stock-extreme
   registered_model: stock-extreme-model
   promote_only_if_better: true
 
 output:
-  models_dir: models
   best_model: models/best_model.joblib
-  report: reports/evaluation.csv

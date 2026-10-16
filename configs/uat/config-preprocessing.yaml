@@ -1,5 +1,5 @@
 input:
-  raw_data: data/raw/apple_stock_raw.xlsx
+  raw_data: raw/apple_stock
   schema: raw_stock
 
 missing_values:
@@ -16,4 +16,4 @@ target:
   shift: 1
 
 output:
-  clean_data: data/interim/apple_stock_clean.xlsx
+  clean_data: interim/apple_stock_clean

@@ -42,4 +42,4 @@ RUN pip install --extra-index-url https://download.pytorch.org/whl/cpu -e ".[dev
 COPY . .
 
 # Run data retrieval by default.
-CMD ["python", "-m", "src.1_data_retrieval"]
+CMD ["python", "-m", "src.pipeline.1_data_retrieval"]

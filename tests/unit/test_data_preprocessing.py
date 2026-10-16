@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-data_preprocessing = importlib.import_module("src.2_data_preprocessing")
+data_preprocessing = importlib.import_module("src.pipeline.2_data_preprocessing")
 
 def fake_prices(dates: list = None, closes: list = None) -> pd.DataFrame:
     """

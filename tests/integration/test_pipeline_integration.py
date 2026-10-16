@@ -2,12 +2,14 @@ import importlib
 import joblib
 import pandas as pd
 import pytest
+from utils.storage_io import StorageIO
 
-data_retrieval = importlib.import_module("src.1_data_retrieval")
-data_preprocessing = importlib.import_module("src.2_data_preprocessing")
-feature_engineering = importlib.import_module("src.3_feature_engineering")
-data_split = importlib.import_module("src.4_data_split")
-model_selection = importlib.import_module("src.5_model_selection")
+data_retrieval = importlib.import_module("src.pipeline.1_data_retrieval")
+data_preprocessing = importlib.import_module("src.pipeline.2_data_preprocessing")
+feature_engineering = importlib.import_module("src.pipeline.3_feature_engineering")
+data_split = importlib.import_module("src.pipeline.4_data_split")
+model_training_evaluation = importlib.import_module("src.pipeline.5_model_training_evaluation")
+model_selection = importlib.import_module("src.pipeline.6_model_selection")
 
 @pytest.mark.integration
 class TestPipelineIntegration:
@@ -29,6 +31,7 @@ class TestPipelineIntegration:
         preprocessing = data_preprocessing.DataPreprocessing()
         engineering = feature_engineering.FeatureEngineering()
         splitter = data_split.DataSplit()
+        training = model_training_evaluation.ModelTrainingEvaluation()
         selection = model_selection.ModelSelection()
 
         # Check preprocessing reads the file retrieval writes.
@@ -40,23 +43,26 @@ class TestPipelineIntegration:
         # Check the split reads the file feature engineering writes.
         assert splitter.input["features"] == engineering.output["features"]
 
-        # Check model selection reads the files the split writes.
-        assert all(selection.input[name] == splitter.output[name] for name in ("train", "val", "test"))
+        # Check training reads the files the split writes.
+        assert all(training.input[name] == splitter.output[name] for name in ("train", "val", "test"))
+
+        # Check selection reads the metrics table and models training writes.
+        assert selection.input["metrics_table"] == training.output["tables"]["metrics"] and selection.input["models_dir"] == training.output["models_dir"]
 
         # Check every step uses the same target column.
-        assert preprocessing.target["column"] == engineering.target["column"] == splitter.target["column"] == selection.target["column"]
+        assert preprocessing.target["column"] == engineering.target["column"] == splitter.target["column"] == training.target["column"]
 
         # Run every step in order.
-        for step in (retrieval, preprocessing, engineering, splitter, selection):
+        for step in (retrieval, preprocessing, engineering, splitter, training, selection):
 
             # Run the step.
             step.pipeline()
 
         # Read the raw data.
-        raw = pd.read_excel(workdir / preprocessing.input["raw_data"])
+        raw = StorageIO().read(table = preprocessing.input["raw_data"])
 
         # Read the feature dataset.
-        features = pd.read_excel(workdir / engineering.output["features"])
+        features = StorageIO().read(table = engineering.output["features"])
 
         # Recalculate each day's extreme event from the raw data.
         events = (raw[preprocessing.daily_returns_config["price_column"]].pct_change().mul(100).abs() > preprocessing.extreme_events_config["threshold"]).astype(int)
@@ -68,7 +74,7 @@ class TestPipelineIntegration:
         assert features[engineering.target["column"]].tolist() == expected.loc[features["Date"]].astype(int).tolist()
 
         # Read the splits.
-        splits = {name: pd.read_excel(workdir / splitter.output[name]) for name in ("train", "val", "test")}
+        splits = {name: StorageIO().read(table = splitter.output[name]) for name in ("train", "val", "test")}
 
         # Check training ends before validation starts and validation ends before test starts.
         assert splits["train"]["Date"].max() < splits["val"]["Date"].min() and splits["val"]["Date"].max() < splits["test"]["Date"].min()
@@ -82,8 +88,8 @@ class TestPipelineIntegration:
         # Check the best model predicts once per test day.
         assert len(best.predict(splits = splits)["test"]["pred"]) == len(splits["test"])
 
-        # Read the evaluation report.
-        report = pd.read_csv(workdir / selection.output["report"])
+        # Read the metrics table.
+        metrics = StorageIO().read(table = training.output["tables"]["metrics"], all_runs = True)
 
-        # Check every configured model and split was scored.
-        assert set(selection.models_config) <= set(report["model"]) and set(report["split"]) == {"train", "val", "test"}
+        # Check every configured model and split was scored and tagged with the run.
+        assert set(training.models_config) <= set(metrics["model"]) and set(metrics["split"]) == {"train", "val", "test"} and (metrics["run_id"] == training.run_id).all()

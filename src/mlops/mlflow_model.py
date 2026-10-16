@@ -4,7 +4,7 @@ import pandas as pd
 
 class MlflowModel(mlflow.pyfunc.PythonModel):
     """
-    MLflow wrapper around a saved RandomForestModel or TemporalCNNModel, so the registry can store and load it in MLflow's standard format.
+    MLflow wrapper around a saved TemporalCNNModel, so the registry can store and load it in MLflow's standard format.
     """
 
     def load_context(self, context):

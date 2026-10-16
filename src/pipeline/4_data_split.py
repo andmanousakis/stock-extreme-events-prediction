@@ -1,6 +1,6 @@
-from pathlib import Path
 import pandas as pd
 from utils.config_loader import ConfigLoader
+from utils.storage_io import StorageIO
 from utils.error_handler import log_step
 from utils.logger import Logger
 
@@ -20,6 +20,9 @@ class DataSplit:
         # Load configs.
         self.config = ConfigLoader().load("config-split")
 
+        # Create the table storage.
+        self.storage = StorageIO()
+
         # Get the input configs.
         self.input = self.config["input"]
 
@@ -38,14 +41,14 @@ class DataSplit:
         Load the feature dataset stored by feature engineering.
 
         Args:
-            path (str): Feature dataset file path.
+            path (str): Feature dataset table name.
 
         Returns:
             pd.DataFrame: Feature dataset sorted by date.
         """
 
-        # Load the feature dataset.
-        df = pd.read_excel(path)
+        # Read the feature dataset table.
+        df = self.storage.read(table = path)
 
         # Make sure rows are in date order before splitting.
         df = df.sort_values("Date").reset_index(drop = True)
@@ -108,7 +111,7 @@ class DataSplit:
     @log_step("Store splits")
     def store_splits(self, splits: dict = None) -> dict:
         """
-        Store each split to its configured Excel file.
+        Store each split as its configured Parquet table.
 
         Args:
             splits (dict): 'train', 'val' and 'test' DataFrames.
@@ -120,14 +123,8 @@ class DataSplit:
         # Store each split.
         for name, df in splits.items():
 
-            # Get the output path.
-            path = Path(self.output[name])
-
-            # Create the output directory if it does not exist.
-            path.parent.mkdir(parents = True, exist_ok = True)
-
-            # Store data.
-            df.to_excel(path, index = False)
+            # Write the split as this run's file of its table.
+            self.storage.write(df = df, table = self.output[name])
 
         # Return splits.
         return splits
