@@ -249,11 +249,13 @@ class ModelSelection:
         return table
 
     @log_step("MLflow tracking")
-    def track(self, table: pd.DataFrame = None) -> dict:
+    def track(self, models: dict = None, predictions: dict = None, table: pd.DataFrame = None) -> dict:
         """
         Log every model to MLflow as its own run. Skipped when no tracking server is configured.
 
         Args:
+            models (dict): Model name to trained model.
+            predictions (dict): Model name to its predictions per split.
             table (pd.DataFrame): One row per model and split.
 
         Returns:
@@ -270,7 +272,7 @@ class ModelSelection:
             return {}
 
         # Log the models.
-        uris = self.tracker.log_models(models_config = self.models_config, table = table, models_dir = self.output["models_dir"])
+        uris = self.tracker.log_models(models_config = self.models_config, models = models, predictions = predictions, table = table, models_dir = self.output["models_dir"])
 
         # Log how many runs were logged.
         self.logger.info(f"Logged {len(uris)} runs to experiment '{self.tracker.experiment}'.")
@@ -337,7 +339,7 @@ class ModelSelection:
         self.save(models = models, best = best, table = table)
 
         # Log every model to MLflow.
-        uris = self.track(table = table)
+        uris = self.track(models = models, predictions = predictions, table = table)
 
         # Register the best model.
         self.register(best = best, uris = uris, table = table)

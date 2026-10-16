@@ -1,5 +1,6 @@
+import numpy as np
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import f1_score
+from sklearn.metrics import f1_score, log_loss
 from sklearn.model_selection import ParameterGrid
 from utils.windowing import Windowing
 
@@ -46,6 +47,9 @@ class RandomForestModel:
 
         # Start without tuning results.
         self.tuning_results = []
+
+        # Start without a training curve.
+        self.history = []
 
     def windows(self, splits: dict = None) -> dict:
         """
@@ -105,8 +109,36 @@ class RandomForestModel:
                 # Store the new best.
                 best_f1, self.model, self.best_params = f1, model, params
 
+        # Record how the error moves as trees are added to the chosen forest.
+        self.history = self.training_curve(windows = windows)
+
         # Return the fitted model.
         return self
+
+    def training_curve(self, windows: dict = None) -> list:
+        """
+        Measure the chosen forest using only its first 1, 2, ... N trees: train and val log loss, and val F1.
+
+        Args:
+            windows (dict): Flattened windows for 'train' and 'val'.
+
+        Returns:
+            list: One entry per number of trees with 'trees', 'train_loss', 'val_loss' and 'val_f1'.
+        """
+
+        # Get each tree's extreme class probability on train and val, one row per tree.
+        probabilities = {name: np.stack([tree.predict_proba(windows[name]["X"])[:, 1] for tree in self.model.estimators_]) for name in ("train", "val")}
+
+        # Average the first k trees for every k.
+        averages = {name: np.cumsum(p, axis = 0) / np.arange(1, len(p) + 1)[:, None] for name, p in probabilities.items()}
+
+        # Score the forest at every size.
+        return [{
+            "trees": k + 1,
+            "train_loss": log_loss(windows["train"]["y"], averages["train"][k], labels = [0, 1]),
+            "val_loss": log_loss(windows["val"]["y"], averages["val"][k], labels = [0, 1]),
+            "val_f1": f1_score(windows["val"]["y"], (averages["val"][k] >= self.threshold).astype(int), zero_division = 0),
+        } for k in range(len(self.model.estimators_))]
 
     def predict_proba(self, splits: dict = None) -> dict:
         """

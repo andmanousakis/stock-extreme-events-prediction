@@ -1,9 +1,11 @@
 import json
 import os
 from pathlib import Path
+import matplotlib.pyplot as plt
 import mlflow
 import pandas as pd
 from mlflow import MlflowClient
+from sklearn.metrics import ConfusionMatrixDisplay, PrecisionRecallDisplay, RocCurveDisplay
 from src.mlops.mlflow_model import MlflowModel
 
 class MlflowTracker:
@@ -40,12 +42,15 @@ class MlflowTracker:
         # Get the environment the models belong to.
         self.env = os.environ.get("APP_ENV", "dev")
 
-    def log_models(self, models_config: dict = None, table: pd.DataFrame = None, models_dir: str = None) -> dict:
+    def log_models(self, models_config: dict = None, models: dict = None, predictions: dict = None, table: pd.DataFrame = None, models_dir: str = None) -> dict:
         """
-        Log one run per model with its settings, its metrics on every split and the saved model in MLflow's format.
+        Log one run per model with its settings, its metrics on every split, its training and tuning curves,
+        its plots and the saved model in MLflow's format.
 
         Args:
             models_config (dict): Model name to its config entry ('class' and 'params').
+            models (dict): Model name to trained model.
+            predictions (dict): Model name to its predictions per split ('y', 'proba', 'pred').
             table (pd.DataFrame): One row per model and split with the metrics.
             models_dir (str): Folder holding each model's saved <name>.joblib.
 
@@ -77,6 +82,12 @@ class MlflowTracker:
                     # Log the split's metrics, skipping missing values.
                     mlflow.log_metrics({f"{row.split}_{metric}": getattr(row, metric) for metric in self.METRICS if not pd.isna(getattr(row, metric))})
 
+                # Log how the error moved during training and tuning.
+                self.log_curves(model = models[name])
+
+                # Log the confusion matrices, ROC and precision-recall curves.
+                self.log_plots(predictions = predictions[name])
+
                 # Log the saved model in MLflow's standard format. Loading it needs this project's code installed, as in its images.
                 info = mlflow.pyfunc.log_model(name = "model", python_model = MlflowModel(), artifacts = {"model": str(Path(models_dir) / f"{name}.joblib")})
 
@@ -85,6 +96,74 @@ class MlflowTracker:
 
         # Return the logged model URIs.
         return uris
+
+    def log_curves(self, model = None):
+        """
+        Log the model's training curve by step: per epoch for the temporal CNN, per number of trees for the random forest,
+        plus the random forest's val F1 for each tuned setting.
+
+        Args:
+            model (RandomForestModel | TemporalCNNModel): Trained model with a 'history' and, for the forest, 'tuning_results'.
+        """
+
+        # Log each point of the training curve.
+        for point in model.history:
+
+            # Use the epoch or the number of trees as the step.
+            step = point.get("epoch", point.get("trees"))
+
+            # Log the point's losses and F1.
+            mlflow.log_metrics({f"training/{key}": value for key, value in point.items() if key not in ("epoch", "trees")}, step = step)
+
+        # Log the val F1 of each tuned setting, in the order they were tried.
+        for step, result in enumerate(getattr(model, "tuning_results", []), start = 1):
+
+            # Log the setting's val F1.
+            mlflow.log_metric("tuning/val_f1", result["val_f1"], step = step)
+
+    def log_plots(self, predictions: dict = None):
+        """
+        Log the confusion matrices, ROC curves and precision-recall curves on train, val and test as images.
+
+        Args:
+            predictions (dict): Split name to its 'y', 'proba' and 'pred'.
+        """
+
+        # Create one confusion matrix per split, side by side.
+        figure, axes = plt.subplots(1, len(predictions), figsize = (5 * len(predictions), 4))
+
+        # Draw each split's confusion matrix.
+        for ax, (split, data) in zip(axes, predictions.items()):
+
+            # Draw the matrix with counts.
+            ConfusionMatrixDisplay.from_predictions(data["y"], data["pred"], labels = [0, 1], display_labels = ["normal", "extreme"], ax = ax, colorbar = False)
+
+            # Title it with the split.
+            ax.set_title(split)
+
+        # Store the figure.
+        mlflow.log_figure(figure, "plots/confusion_matrix.png")
+
+        # Free the figure.
+        plt.close(figure)
+
+        # Draw the ROC and precision-recall curves of every split.
+        for display, file in ((RocCurveDisplay, "roc_curve.png"), (PrecisionRecallDisplay, "precision_recall_curve.png")):
+
+            # Create one chart for all splits.
+            figure, ax = plt.subplots(figsize = (6, 5))
+
+            # Add each split's curve.
+            for split, data in predictions.items():
+
+                # Draw the curve from the extreme class probabilities.
+                display.from_predictions(data["y"], data["proba"], name = split, ax = ax)
+
+            # Store the figure.
+            mlflow.log_figure(figure, f"plots/{file}")
+
+            # Free the figure.
+            plt.close(figure)
 
     def register_best(self, best: str = None, uris: dict = None, table: pd.DataFrame = None) -> dict:
         """
