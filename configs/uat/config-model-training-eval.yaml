@@ -1,0 +1,31 @@
+input:
+  train: processed/train
+  val: processed/val
+  test: processed/test
+
+target:
+  column: extreme_event_next_day
+
+models:
+  temporal_cnn:
+    class: TemporalCNNModel
+    params:
+      features: [daily_return, volatility_5, volatility_10, volatility_20, range, gap, volume_ratio]
+      window: 10
+      network: TemporalCNNNetwork
+      channels: [8, 16]
+      dropout: 0.5
+      learning_rate: 0.0003
+      weight_decay: 0.0001
+      class_weights: true
+      tune_threshold: true
+      threshold_metric: mcc
+
+tracking:
+  experiment: stock-extreme
+
+output:
+  models_dir: models
+  tables:
+    metrics: evaluation/metrics
+    predictions: evaluation/predictions

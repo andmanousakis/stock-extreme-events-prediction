@@ -7,7 +7,6 @@ __pycache__/
 # Generated data and logs
 data/
 logs/
-/*.xlsx
 
 # Trained models and reports
 models/*.joblib

@@ -1,6 +1,6 @@
-from pathlib import Path
 import pandas as pd
 from utils.config_loader import ConfigLoader
+from utils.delta_io import DeltaIO
 from utils.error_handler import log_step
 from utils.logger import Logger
 from utils.schema_loader import SchemaLoader
@@ -21,6 +21,9 @@ class DataPreprocessing:
 
         # Load configs.
         self.config = ConfigLoader().load("config-preprocessing")
+
+        # Create the Delta table reader and writer.
+        self.delta = DeltaIO()
 
         # Get the input configs.
         self.input = self.config["input"]
@@ -52,14 +55,14 @@ class DataPreprocessing:
         Load the raw price data stored by data retrieval.
 
         Args:
-            path (str): Raw data file path.
+            path (str): Raw data table name.
 
         Returns:
             pd.DataFrame: Raw price data.
         """
 
-        # Load raw data.
-        df = pd.read_excel(path)
+        # Read the raw data table.
+        df = self.delta.read(table = path)
 
         # Return data.
         return df
@@ -214,21 +217,18 @@ class DataPreprocessing:
     @log_step("Store clean data")
     def store_clean_data(self, df: pd.DataFrame = None, path: str = None) -> pd.DataFrame:
         """
-        Store the clean price data to Excel.
+        Store the clean price data as a Delta table.
 
         Args:
             df (pd.DataFrame): Clean price data.
-            path (str): Output file path.
+            path (str): Output table name.
 
         Returns:
             pd.DataFrame: The stored data.
         """
 
-        # Create the output directory if it does not exist.
-        Path(path).parent.mkdir(parents = True, exist_ok = True)
-
-        # Store data.
-        df.to_excel(path, index = False)
+        # Write the data as a new version of the table.
+        self.delta.write(df = df, table = path)
 
         # Return data.
         return df

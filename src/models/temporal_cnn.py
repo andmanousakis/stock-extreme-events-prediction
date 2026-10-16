@@ -2,7 +2,7 @@ import copy
 import numpy as np
 import torch
 import torch.nn as nn
-from sklearn.metrics import f1_score
+from sklearn.metrics import f1_score, matthews_corrcoef
 from sklearn.preprocessing import StandardScaler
 from torch.utils.data import DataLoader, TensorDataset
 from src.models.networks.temporal_cnn import TemporalCNNNetwork
@@ -11,7 +11,7 @@ from utils.windowing import Windowing
 class TemporalCNNModel:
     """
     Temporal CNN on scaled 10-day sequences, trained with early stopping on the validation set.
-    The same class covers the baseline and improved versions; only the settings differ, including which network to train.
+    Its settings, including which network to train, come from the config.
     """
 
     # Networks the config can choose by name.
@@ -20,7 +20,7 @@ class TemporalCNNModel:
     def __init__(self, features: list = None, target: str = None, window: int = 10, network: str = "TemporalCNNNetwork", channels: list = None, kernel_size: int = 3,
                  dropout: float = 0.3, seed: int = 42, batch_size: int = 32, learning_rate: float = 0.001, max_epochs: int = 200,
                  patience: int = 15, class_weights: bool = False, weight_decay: float = 0.0, early_stopping_metric: str = "loss",
-                 tune_threshold: bool = False):
+                 tune_threshold: bool = False, threshold_metric: str = "f1"):
         """
         Store the model settings.
 
@@ -40,7 +40,8 @@ class TemporalCNNModel:
             class_weights (bool): Weight the loss by inverse class frequency.
             weight_decay (float): Adam weight decay, penalising large weights.
             early_stopping_metric (str): 'loss' (lower val loss) or 'f1' (higher val F1).
-            tune_threshold (bool): Pick the decision threshold with the best val F1 instead of 0.5.
+            tune_threshold (bool): Pick the decision threshold with the best val score instead of 0.5.
+            threshold_metric (str): Val score used to pick the threshold: 'f1' or 'mcc' (MCC cannot be won by flagging every day).
         """
 
         # Store the feature columns.
@@ -60,7 +61,7 @@ class TemporalCNNModel:
 
         # Store the training settings.
         self.training = {"seed": seed, "batch_size": batch_size, "learning_rate": learning_rate, "max_epochs": max_epochs, "patience": patience,
-                         "class_weights": class_weights, "weight_decay": weight_decay, "early_stopping_metric": early_stopping_metric, "tune_threshold": tune_threshold}
+                         "class_weights": class_weights, "weight_decay": weight_decay, "early_stopping_metric": early_stopping_metric, "tune_threshold": tune_threshold, "threshold_metric": threshold_metric}
 
         # Call a day extreme when its probability reaches 0.5 unless tuned.
         self.threshold = 0.5
@@ -241,10 +242,13 @@ class TemporalCNNModel:
             # Try thresholds from 0.05 to 0.95.
             thresholds = np.round(np.arange(0.05, 0.96, 0.05), 2)
 
-            # Score each threshold by validation F1.
-            scores = [f1_score(windows["val"]["y"], (probabilities >= t).astype(int), zero_division = 0) for t in thresholds]
+            # Get the configured scoring function.
+            metric = matthews_corrcoef if self.training["threshold_metric"] == "mcc" else lambda y, pred: f1_score(y, pred, zero_division = 0)
 
-            # Keep the threshold with the best F1.
+            # Score each threshold on the validation windows.
+            scores = [metric(windows["val"]["y"], (probabilities >= t).astype(int)) for t in thresholds]
+
+            # Keep the threshold with the best score.
             self.threshold = float(thresholds[int(np.argmax(scores))])
 
         # Return the fitted model.

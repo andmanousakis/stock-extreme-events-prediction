@@ -1,8 +1,8 @@
 import time
-from pathlib import Path
 import pandas as pd
 import yfinance as yf
 from utils.config_loader import ConfigLoader
+from utils.delta_io import DeltaIO
 from utils.error_handler import log_step
 from utils.logger import Logger
 from utils.schema_loader import SchemaLoader
@@ -22,6 +22,9 @@ class DataRetrieval:
 
         # Load configs.
         self.config = ConfigLoader().load("config-retrieval")
+
+        # Create the Delta table reader and writer.
+        self.delta = DeltaIO()
 
         # Get the request configs.
         self.request = self.config["request"]
@@ -118,21 +121,18 @@ class DataRetrieval:
     @log_step("Store raw data")
     def store_raw_data(self, df: pd.DataFrame = None, path: str = None) -> pd.DataFrame:
         """
-        Store the raw price data to Excel.
+        Store the raw price data as a Delta table.
 
         Args:
             df (pd.DataFrame): Raw price data.
-            path (str): Output file path.
+            path (str): Output table name, e.g. 'raw/apple_stock'.
 
         Returns:
             pd.DataFrame: The stored data.
         """
 
-        # Create the output directory if it does not exist.
-        Path(path).parent.mkdir(parents = True, exist_ok = True)
-
-        # Store data.
-        df.to_excel(path, index = False)
+        # Write the data as a new version of the table.
+        self.delta.write(df = df, table = path)
 
         # Return data.
         return df

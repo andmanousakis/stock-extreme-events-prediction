@@ -2,7 +2,7 @@ import importlib
 import pandas as pd
 import pytest
 
-data_retrieval = importlib.import_module("src.1_data_retrieval")
+data_retrieval = importlib.import_module("src.pipeline.1_data_retrieval")
 
 def fake_yahoo_data() -> pd.DataFrame:
     """

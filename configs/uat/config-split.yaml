@@ -1,5 +1,5 @@
 input:
-  features: data/processed/apple_stock_features.xlsx
+  features: processed/apple_stock_features
 
 target:
   column: extreme_event_next_day
@@ -9,6 +9,6 @@ ratios:
   val: 0.15
 
 output:
-  train: data/processed/splits/train.xlsx
-  val: data/processed/splits/val.xlsx
-  test: data/processed/splits/test.xlsx
+  train: processed/train
+  val: processed/val
+  test: processed/test

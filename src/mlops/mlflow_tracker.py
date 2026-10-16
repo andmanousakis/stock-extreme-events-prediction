@@ -55,14 +55,14 @@ class MlflowTracker:
             models_dir (str): Folder holding each model's saved <name>.joblib.
 
         Returns:
-            dict: Model name to its logged model URI.
+            dict: Model name to its 'mlflow_run_id' and logged 'model_uri'.
         """
 
         # Use the configured experiment.
         mlflow.set_experiment(self.experiment)
 
         # Start with no logged models.
-        uris = {}
+        runs = {}
 
         # Log each model as its own run.
         for name, entry in models_config.items():
@@ -91,35 +91,25 @@ class MlflowTracker:
                 # Log the saved model in MLflow's standard format. Loading it needs this project's code installed, as in its images.
                 info = mlflow.pyfunc.log_model(name = "model", python_model = MlflowModel(), artifacts = {"model": str(Path(models_dir) / f"{name}.joblib")})
 
-                # Store the logged model URI.
-                uris[name] = info.model_uri
+                # Store the run ID and logged model URI.
+                runs[name] = {"mlflow_run_id": mlflow.active_run().info.run_id, "model_uri": info.model_uri}
 
-        # Return the logged model URIs.
-        return uris
+        # Return the runs.
+        return runs
 
     def log_curves(self, model = None):
         """
-        Log the model's training curve by step: per epoch for the temporal CNN, per number of trees for the random forest,
-        plus the random forest's val F1 for each tuned setting.
+        Log the model's training curve by epoch.
 
         Args:
-            model (RandomForestModel | TemporalCNNModel): Trained model with a 'history' and, for the forest, 'tuning_results'.
+            model (TemporalCNNModel): Trained model with a per-epoch 'history'.
         """
 
         # Log each point of the training curve.
         for point in model.history:
 
-            # Use the epoch or the number of trees as the step.
-            step = point.get("epoch", point.get("trees"))
-
-            # Log the point's losses and F1.
-            mlflow.log_metrics({f"training/{key}": value for key, value in point.items() if key not in ("epoch", "trees")}, step = step)
-
-        # Log the val F1 of each tuned setting, in the order they were tried.
-        for step, result in enumerate(getattr(model, "tuning_results", []), start = 1):
-
-            # Log the setting's val F1.
-            mlflow.log_metric("tuning/val_f1", result["val_f1"], step = step)
+            # Log the epoch's losses and F1.
+            mlflow.log_metrics({f"training/{key}": value for key, value in point.items() if key != "epoch"}, step = point["epoch"])
 
     def log_plots(self, predictions: dict = None):
         """
@@ -165,15 +155,16 @@ class MlflowTracker:
             # Free the figure.
             plt.close(figure)
 
-    def register_best(self, best: str = None, uris: dict = None, table: pd.DataFrame = None) -> dict:
+    def register_best(self, best: str = None, model_uri: str = None, table: pd.DataFrame = None, metric: str = "f1") -> dict:
         """
         Register the best model as a new version, tag it, and point the environment's alias at it.
-        With promote_only_if_better, the alias only moves if the new version's val F1 beats the version it points at.
+        With promote_only_if_better, the alias only moves if the new version's val score beats the version it points at.
 
         Args:
             best (str): Name of the best model.
-            uris (dict): Model name to its logged model URI.
+            model_uri (str): The best model's logged model URI.
             table (pd.DataFrame): One row per model and split with the metrics.
+            metric (str): Metric used to compare versions, e.g. 'mcc'.
 
         Returns:
             dict: The registered 'version' and whether the alias was 'promoted'.
@@ -182,14 +173,14 @@ class MlflowTracker:
         # Create the registry client.
         client = MlflowClient()
 
-        # Get the best model's F1 per split.
-        f1 = table[table["model"] == best].set_index("split")["f1"]
+        # Get the best model's score per split.
+        score = table[table["model"] == best].set_index("split")[metric]
 
         # Register the best model as a new version.
-        version = mlflow.register_model(model_uri = uris[best], name = self.registered_model).version
+        version = mlflow.register_model(model_uri = model_uri, name = self.registered_model).version
 
         # Tag the version with what it is and how it scored.
-        for key, value in {"environment": self.env, "model": best, "val_f1": f"{f1['val']:.6f}", "test_f1": f"{f1['test']:.6f}"}.items():
+        for key, value in {"environment": self.env, "model": best, "metric": metric, f"val_{metric}": f"{score['val']:.6f}", f"test_{metric}": f"{score['test']:.6f}"}.items():
 
             # Set the tag.
             client.set_model_version_tag(self.registered_model, version, key, value)
@@ -200,11 +191,11 @@ class MlflowTracker:
         # Compare with the current version if only better models may be promoted.
         if self.promote_only_if_better:
 
-            # Read the val F1 of the version the alias points at.
+            # Read the val score of the version the alias points at.
             try:
 
-                # Get the current version's val F1.
-                current = float(client.get_model_version_by_alias(self.registered_model, self.env).tags.get("val_f1", "-1"))
+                # Get the current version's val score on the same metric.
+                current = float(client.get_model_version_by_alias(self.registered_model, self.env).tags.get(f"val_{metric}", "-1"))
 
             except mlflow.exceptions.MlflowException:
 
@@ -212,7 +203,7 @@ class MlflowTracker:
                 current = -1.0
 
             # Move the alias only if the new version is better.
-            promote = f1["val"] > current
+            promote = score["val"] > current
 
         # Point the environment's alias at the new version if it should move.
         if promote:
