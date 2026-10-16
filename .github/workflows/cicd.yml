@@ -17,11 +17,12 @@ env:
   APP_ENV: ${{ github.ref_name == 'prod' && 'prod' || github.ref_name == 'uat' && 'uat' || 'dev' }}
   # Pipeline run ID written to the metrics and predictions tables: run number and attempt.
   PIPELINE_RUN_ID: r${{ github.run_number }}.${{ github.run_attempt }}
-  # Delta table storage on DagsHub, used by every pipeline job.
+  # Delta table storage (Backblaze B2), used by every pipeline job.
   DELTA_BUCKET: ${{ secrets.DELTA_BUCKET }}
   AWS_ENDPOINT_URL: ${{ secrets.AWS_ENDPOINT_URL }}
   AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
   AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  AWS_REGION: ${{ secrets.AWS_REGION }}
 
 jobs:
   # CI: build the image and run the unit tests. Runs on every push and pull request.
@@ -126,7 +127,7 @@ jobs:
       - name: Run data retrieval
         run: |
           mkdir -p data logs
-          docker run --rm -e APP_ENV=${{ env.APP_ENV }} -e DELTA_BUCKET -e AWS_ENDPOINT_URL -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -u $(id -u):$(id -g) -v "$PWD/data":/app/data -v "$PWD/logs":/app/logs ${{ env.IMAGE }}:${{ github.sha }} python -m src.pipeline.1_data_retrieval
+          docker run --rm -e APP_ENV=${{ env.APP_ENV }} -e DELTA_BUCKET -e AWS_ENDPOINT_URL -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_REGION -u $(id -u):$(id -g) -v "$PWD/data":/app/data -v "$PWD/logs":/app/logs ${{ env.IMAGE }}:${{ github.sha }} python -m src.pipeline.1_data_retrieval
 
       # Create the run's release with the retrieval log, tagged tagged data-<environment>-<date>-<short sha>-r<run number>.<attempt>, unique per run and re-run.
       - name: Create data release
@@ -170,7 +171,7 @@ jobs:
       - name: Run data preprocessing
         run: |
           mkdir -p logs
-          docker run --rm -e APP_ENV=${{ env.APP_ENV }} -e DELTA_BUCKET -e AWS_ENDPOINT_URL -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -u $(id -u):$(id -g) -v "$PWD/data":/app/data -v "$PWD/logs":/app/logs ${{ env.IMAGE }}:${{ github.sha }} python -m src.pipeline.2_data_preprocessing
+          docker run --rm -e APP_ENV=${{ env.APP_ENV }} -e DELTA_BUCKET -e AWS_ENDPOINT_URL -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_REGION -u $(id -u):$(id -g) -v "$PWD/data":/app/data -v "$PWD/logs":/app/logs ${{ env.IMAGE }}:${{ github.sha }} python -m src.pipeline.2_data_preprocessing
 
       # Add the clean data and preprocessing log to the release.
       - name: Upload clean data
@@ -203,7 +204,7 @@ jobs:
       - name: Run feature engineering
         run: |
           mkdir -p logs
-          docker run --rm -e APP_ENV=${{ env.APP_ENV }} -e DELTA_BUCKET -e AWS_ENDPOINT_URL -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -u $(id -u):$(id -g) -v "$PWD/data":/app/data -v "$PWD/logs":/app/logs ${{ env.IMAGE }}:${{ github.sha }} python -m src.pipeline.3_feature_engineering
+          docker run --rm -e APP_ENV=${{ env.APP_ENV }} -e DELTA_BUCKET -e AWS_ENDPOINT_URL -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_REGION -u $(id -u):$(id -g) -v "$PWD/data":/app/data -v "$PWD/logs":/app/logs ${{ env.IMAGE }}:${{ github.sha }} python -m src.pipeline.3_feature_engineering
 
       # Add the feature dataset and feature engineering log to the release.
       - name: Upload features
@@ -236,7 +237,7 @@ jobs:
       - name: Run data split
         run: |
           mkdir -p logs
-          docker run --rm -e APP_ENV=${{ env.APP_ENV }} -e DELTA_BUCKET -e AWS_ENDPOINT_URL -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -u $(id -u):$(id -g) -v "$PWD/data":/app/data -v "$PWD/logs":/app/logs ${{ env.IMAGE }}:${{ github.sha }} python -m src.pipeline.4_data_split
+          docker run --rm -e APP_ENV=${{ env.APP_ENV }} -e DELTA_BUCKET -e AWS_ENDPOINT_URL -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_REGION -u $(id -u):$(id -g) -v "$PWD/data":/app/data -v "$PWD/logs":/app/logs ${{ env.IMAGE }}:${{ github.sha }} python -m src.pipeline.4_data_split
 
       # Add the train, val and test sets and the split log to the release.
       - name: Upload splits
@@ -274,12 +275,12 @@ jobs:
       - name: Train and evaluate models
         run: |
           mkdir -p models logs
-          docker run --rm -e APP_ENV=${{ env.APP_ENV }} -e PIPELINE_RUN_ID -e MLFLOW_TRACKING_URI -e MLFLOW_TRACKING_USERNAME -e MLFLOW_TRACKING_PASSWORD -e DELTA_BUCKET -e AWS_ENDPOINT_URL -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e GITHUB_REF_NAME -e GITHUB_SHA -u $(id -u):$(id -g) -v "$PWD/data":/app/data -v "$PWD/models":/app/models -v "$PWD/logs":/app/logs ${{ env.IMAGE }}:${{ github.sha }} python -m src.pipeline.5_model_training_evaluation
+          docker run --rm -e APP_ENV=${{ env.APP_ENV }} -e PIPELINE_RUN_ID -e MLFLOW_TRACKING_URI -e MLFLOW_TRACKING_USERNAME -e MLFLOW_TRACKING_PASSWORD -e DELTA_BUCKET -e AWS_ENDPOINT_URL -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_REGION -e GITHUB_REF_NAME -e GITHUB_SHA -u $(id -u):$(id -g) -v "$PWD/data":/app/data -v "$PWD/models":/app/models -v "$PWD/logs":/app/logs ${{ env.IMAGE }}:${{ github.sha }} python -m src.pipeline.5_model_training_evaluation
 
       # Show this run's test metrics from the metrics table on the workflow run page.
       - name: Write job summary
         run: |
-          docker run --rm -e APP_ENV=${{ env.APP_ENV }} -e PIPELINE_RUN_ID -e DELTA_BUCKET -e AWS_ENDPOINT_URL -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY ${{ env.IMAGE }}:${{ github.sha }} python -c "
+          docker run --rm -e APP_ENV=${{ env.APP_ENV }} -e PIPELINE_RUN_ID -e DELTA_BUCKET -e AWS_ENDPOINT_URL -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_REGION ${{ env.IMAGE }}:${{ github.sha }} python -c "
           import os
           from utils.delta_io import DeltaIO
           m = DeltaIO().read(table = 'evaluation/metrics')
@@ -328,7 +329,7 @@ jobs:
       - name: Select best model
         run: |
           mkdir -p logs
-          docker run --rm -e APP_ENV=${{ env.APP_ENV }} -e MLFLOW_TRACKING_URI -e MLFLOW_TRACKING_USERNAME -e MLFLOW_TRACKING_PASSWORD -e DELTA_BUCKET -e AWS_ENDPOINT_URL -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -u $(id -u):$(id -g) -v "$PWD/models":/app/models -v "$PWD/logs":/app/logs ${{ env.IMAGE }}:${{ github.sha }} python -m src.pipeline.6_model_selection
+          docker run --rm -e APP_ENV=${{ env.APP_ENV }} -e MLFLOW_TRACKING_URI -e MLFLOW_TRACKING_USERNAME -e MLFLOW_TRACKING_PASSWORD -e DELTA_BUCKET -e AWS_ENDPOINT_URL -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_REGION -u $(id -u):$(id -g) -v "$PWD/models":/app/models -v "$PWD/logs":/app/logs ${{ env.IMAGE }}:${{ github.sha }} python -m src.pipeline.6_model_selection
 
       # Add the best model and log to the release.
       - name: Upload best model

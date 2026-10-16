@@ -54,7 +54,7 @@ ci > cd > integration > retrieve > preprocess > features > split > training-eval
 1. **ci** — builds the image and runs the unit tests. Runs on every push and pull request.
 2. **cd** — publishes the image to GitHub Container Registry as `ghcr.io/andmanousakis/stock-extreme:<environment>` and `:<commit>`. Runs on pushes only.
 3. **integration** — pulls the published image and runs the integration tests against Yahoo Finance.
-4. **retrieve** — downloads AAPL prices, checks them against the schema, writes the raw Delta table on DagsHub storage, and creates a `data-<environment>-<date>-<commit>-r<run>.<attempt>` release for the run's logs and models.
+4. **retrieve** — downloads AAPL prices, checks them against the schema, writes the raw Delta table on Backblaze B2, and creates a `data-<environment>-<date>-<commit>-r<run>.<attempt>` release for the run's logs and models.
 5. **preprocess** — reads the raw table, cleans it, calculates daily returns, labels next-day extreme events, and writes the clean table.
 6. **features** — reads the clean table, adds volatility, range, gap and volume-ratio features, and writes the feature table.
 7. **split** — reads the feature table and splits it in time order (70% train, 15% val, 15% test) into three tables.

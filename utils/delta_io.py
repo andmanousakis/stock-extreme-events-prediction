@@ -5,7 +5,7 @@ from deltalake import DeltaTable, write_deltalake
 class DeltaIO:
     """
     Read and write pandas DataFrames as Delta tables, one folder per environment. Tables live on the S3 bucket
-    named by DELTA_BUCKET (DagsHub storage) when it is set, and under the local data folder otherwise.
+    named by DELTA_BUCKET (S3-compatible storage, e.g. Backblaze B2) when it is set, and under the local data folder otherwise.
     Every write adds a new table version, so earlier versions stay readable.
     """
 
@@ -28,12 +28,12 @@ class DeltaIO:
         # Store the local fallback folder.
         self.local_dir = local_dir
 
-        # Pass the S3 endpoint and keys to Delta; DagsHub storage needs no region or locking service.
+        # Pass the S3 endpoint, keys and region to Delta, without a locking service (one writer per table).
         self.storage_options = {
             "AWS_ENDPOINT_URL": os.environ.get("AWS_ENDPOINT_URL", ""),
             "AWS_ACCESS_KEY_ID": os.environ.get("AWS_ACCESS_KEY_ID", ""),
             "AWS_SECRET_ACCESS_KEY": os.environ.get("AWS_SECRET_ACCESS_KEY", ""),
-            "AWS_REGION": "us-east-1",
+            "AWS_REGION": os.environ.get("AWS_REGION", "us-east-1"),
             "AWS_S3_ALLOW_UNSAFE_RENAME": "true",
         } if self.bucket else {}
 
