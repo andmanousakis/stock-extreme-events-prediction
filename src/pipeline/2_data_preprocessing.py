@@ -1,6 +1,6 @@
 import pandas as pd
 from utils.config_loader import ConfigLoader
-from utils.delta_io import DeltaIO
+from utils.storage_io import StorageIO
 from utils.error_handler import log_step
 from utils.logger import Logger
 from utils.schema_loader import SchemaLoader
@@ -22,8 +22,8 @@ class DataPreprocessing:
         # Load configs.
         self.config = ConfigLoader().load("config-preprocessing")
 
-        # Create the Delta table reader and writer.
-        self.delta = DeltaIO()
+        # Create the table storage.
+        self.storage = StorageIO()
 
         # Get the input configs.
         self.input = self.config["input"]
@@ -62,7 +62,7 @@ class DataPreprocessing:
         """
 
         # Read the raw data table.
-        df = self.delta.read(table = path)
+        df = self.storage.read(table = path)
 
         # Return data.
         return df
@@ -217,7 +217,7 @@ class DataPreprocessing:
     @log_step("Store clean data")
     def store_clean_data(self, df: pd.DataFrame = None, path: str = None) -> pd.DataFrame:
         """
-        Store the clean price data as a Delta table.
+        Store the clean price data as a Parquet table.
 
         Args:
             df (pd.DataFrame): Clean price data.
@@ -227,8 +227,8 @@ class DataPreprocessing:
             pd.DataFrame: The stored data.
         """
 
-        # Write the data as a new version of the table.
-        self.delta.write(df = df, table = path)
+        # Write the data as this run's file of the table.
+        self.storage.write(df = df, table = path)
 
         # Return data.
         return df

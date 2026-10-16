@@ -3,7 +3,7 @@ from pathlib import Path
 import pandas as pd
 from src.mlops.mlflow_tracker import MlflowTracker
 from utils.config_loader import ConfigLoader
-from utils.delta_io import DeltaIO
+from utils.storage_io import StorageIO
 from utils.error_handler import log_step
 from utils.logger import Logger
 
@@ -36,8 +36,8 @@ class ModelSelection:
         # Create the MLflow tracker from the tracking configs.
         self.tracker = MlflowTracker(**self.config["tracking"])
 
-        # Create the Delta table reader.
-        self.delta = DeltaIO()
+        # Create the table storage.
+        self.storage = StorageIO()
 
     @log_step("Load metrics")
     def load_metrics(self) -> pd.DataFrame:
@@ -49,7 +49,7 @@ class ModelSelection:
         """
 
         # Read the metrics table.
-        metrics = self.delta.read(table = self.input["metrics_table"])
+        metrics = self.storage.read(table = self.input["metrics_table"], all_runs = True)
 
         # Find the latest run.
         latest = metrics.sort_values("run_date").iloc[-1]["run_id"]

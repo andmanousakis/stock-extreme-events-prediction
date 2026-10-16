@@ -54,12 +54,12 @@ ci > cd > integration > retrieve > preprocess > features > split > training-eval
 1. **ci** — builds the image and runs the unit tests. Runs on every push and pull request.
 2. **cd** — publishes the image to GitHub Container Registry as `ghcr.io/andmanousakis/stock-extreme:<environment>` and `:<commit>`. Runs on pushes only.
 3. **integration** — pulls the published image and runs the integration tests against Yahoo Finance.
-4. **retrieve** — downloads AAPL prices, checks them against the schema, writes the raw Delta table on Backblaze B2, and creates a `data-<environment>-<date>-<commit>-r<run>.<attempt>` release for the run's logs and models.
+4. **retrieve** — downloads AAPL prices, checks them against the schema, writes the raw Parquet table on DagsHub storage, and creates a `data-<environment>-<date>-<commit>-r<run>.<attempt>` release for the run's logs and models.
 5. **preprocess** — reads the raw table, cleans it, calculates daily returns, labels next-day extreme events, and writes the clean table.
 6. **features** — reads the clean table, adds volatility, range, gap and volume-ratio features, and writes the feature table.
 7. **split** — reads the feature table and splits it in time order (70% train, 15% val, 15% test) into three tables.
-8. **training-evaluation** — reads the three tables, trains every model in the config, scores it on train, val and test (F1, precision, recall, MCC, ROC AUC, accuracy), logs it to MLflow, appends its metrics and predictions to Delta tables (tagged with the run ID and date), shows the test results on the run page, and adds the models to the release.
-9. **model-selection** — reads this run's metrics from the Delta table, picks the best model by validation F1, registers it in MLflow with the environment's alias, and adds it to the same release.
+8. **training-evaluation** — reads the three tables, trains every model in the config, scores it on train, val and test (F1, precision, recall, MCC, ROC AUC, accuracy), logs it to MLflow, writes its metrics and predictions tables (tagged with the run ID and date), shows the test results on the run page, and adds the models to the release.
+9. **model-selection** — reads this run's metrics from the metrics table, picks the best model by validation F1, registers it in MLflow with the environment's alias, and adds it to the same release.
 
 GitHub Actions builds from [`docker/deploy/Dockerfile`](docker/deploy/Dockerfile). [`docker/local/`](docker/local/) and the makefile are for local development only.
 

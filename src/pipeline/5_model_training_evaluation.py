@@ -8,14 +8,14 @@ from sklearn.metrics import accuracy_score, f1_score, matthews_corrcoef, precisi
 from src.mlops.mlflow_tracker import MlflowTracker
 from src.models.temporal_cnn import TemporalCNNModel
 from utils.config_loader import ConfigLoader
-from utils.delta_io import DeltaIO
+from utils.storage_io import StorageIO
 from utils.error_handler import log_step
 from utils.logger import Logger
 
 class ModelTrainingEvaluation:
     """
     Train every configured model, score it on train, val and test, save it, log it to MLflow,
-    and append its metrics and predictions to Delta tables tagged with the pipeline run.
+    and write its metrics and predictions to Parquet tables tagged with the pipeline run.
     """
 
     # Model classes the config can refer to by name.
@@ -47,8 +47,8 @@ class ModelTrainingEvaluation:
         # Create the MLflow tracker from the tracking configs.
         self.tracker = MlflowTracker(**self.config["tracking"])
 
-        # Create the Delta table reader and writer.
-        self.delta = DeltaIO()
+        # Create the table storage.
+        self.storage = StorageIO()
 
         # Get the run start time in UTC.
         self.run_date = datetime.now(timezone.utc)
@@ -66,7 +66,7 @@ class ModelTrainingEvaluation:
         """
 
         # Read each split table.
-        return {name: self.delta.read(table = self.input[name]) for name in ("train", "val", "test")}
+        return {name: self.storage.read(table = self.input[name]) for name in ("train", "val", "test")}
 
     @log_step("Build models")
     def build_models(self) -> dict:
@@ -268,7 +268,7 @@ class ModelTrainingEvaluation:
     @log_step("Write tables")
     def write_tables(self, table: pd.DataFrame = None, predictions: dict = None, runs: dict = None) -> dict:
         """
-        Append this run's metrics and predictions to their Delta tables, tagged with the run ID, run date,
+        Write this run's metrics and predictions to their Parquet tables, tagged with the run ID, run date,
         and each model's MLflow run ID and model URI.
 
         Args:
@@ -277,7 +277,7 @@ class ModelTrainingEvaluation:
             runs (dict): Model name to its 'mlflow_run_id' and 'model_uri'.
 
         Returns:
-            dict: Table name to its new version.
+            dict: Table name to its written file.
         """
 
         # Add the run columns to the metrics.
@@ -286,14 +286,14 @@ class ModelTrainingEvaluation:
         # Build one prediction row per model, split and day, with the run columns.
         rows = pd.concat([pd.DataFrame({"model": model, "split": split, "date": data["dates"], "y": data["y"], "proba": data["proba"], "pred": data["pred"]}).assign(**self.run_columns(model = model, runs = runs)) for model, splits in predictions.items() for split, data in splits.items()], ignore_index = True)
 
-        # Append both tables.
-        versions = {name: self.delta.write(df = df, table = self.output["tables"][name], mode = "append") for name, df in (("metrics", metrics), ("predictions", rows))}
+        # Write this run's file of both tables.
+        written = {name: self.storage.write(df = df, table = self.output["tables"][name]) for name, df in (("metrics", metrics), ("predictions", rows))}
 
         # Log where they went.
-        self.logger.info(f"Run {self.run_id}: metrics table version {versions['metrics']}, predictions table version {versions['predictions']}.")
+        self.logger.info(f"Run {self.run_id}: wrote {written['metrics']} and {written['predictions']}.")
 
-        # Return the new versions.
-        return versions
+        # Return the written files.
+        return written
 
     def pipeline(self):
         """
@@ -324,7 +324,7 @@ class ModelTrainingEvaluation:
         # Log every model to MLflow.
         runs = self.track(models = models, predictions = predictions, table = table)
 
-        # Append the metrics and predictions tables.
+        # Write the metrics and predictions tables.
         self.write_tables(table = table, predictions = predictions, runs = runs)
 
     @classmethod

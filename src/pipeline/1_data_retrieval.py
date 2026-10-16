@@ -2,7 +2,7 @@ import time
 import pandas as pd
 import yfinance as yf
 from utils.config_loader import ConfigLoader
-from utils.delta_io import DeltaIO
+from utils.storage_io import StorageIO
 from utils.error_handler import log_step
 from utils.logger import Logger
 from utils.schema_loader import SchemaLoader
@@ -23,8 +23,8 @@ class DataRetrieval:
         # Load configs.
         self.config = ConfigLoader().load("config-retrieval")
 
-        # Create the Delta table reader and writer.
-        self.delta = DeltaIO()
+        # Create the table storage.
+        self.storage = StorageIO()
 
         # Get the request configs.
         self.request = self.config["request"]
@@ -121,7 +121,7 @@ class DataRetrieval:
     @log_step("Store raw data")
     def store_raw_data(self, df: pd.DataFrame = None, path: str = None) -> pd.DataFrame:
         """
-        Store the raw price data as a Delta table.
+        Store the raw price data as a Parquet table.
 
         Args:
             df (pd.DataFrame): Raw price data.
@@ -131,8 +131,8 @@ class DataRetrieval:
             pd.DataFrame: The stored data.
         """
 
-        # Write the data as a new version of the table.
-        self.delta.write(df = df, table = path)
+        # Write the data as this run's file of the table.
+        self.storage.write(df = df, table = path)
 
         # Return data.
         return df

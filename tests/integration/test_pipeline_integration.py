@@ -2,7 +2,7 @@ import importlib
 import joblib
 import pandas as pd
 import pytest
-from utils.delta_io import DeltaIO
+from utils.storage_io import StorageIO
 
 data_retrieval = importlib.import_module("src.pipeline.1_data_retrieval")
 data_preprocessing = importlib.import_module("src.pipeline.2_data_preprocessing")
@@ -59,10 +59,10 @@ class TestPipelineIntegration:
             step.pipeline()
 
         # Read the raw data.
-        raw = DeltaIO().read(table = preprocessing.input["raw_data"])
+        raw = StorageIO().read(table = preprocessing.input["raw_data"])
 
         # Read the feature dataset.
-        features = DeltaIO().read(table = engineering.output["features"])
+        features = StorageIO().read(table = engineering.output["features"])
 
         # Recalculate each day's extreme event from the raw data.
         events = (raw[preprocessing.daily_returns_config["price_column"]].pct_change().mul(100).abs() > preprocessing.extreme_events_config["threshold"]).astype(int)
@@ -74,7 +74,7 @@ class TestPipelineIntegration:
         assert features[engineering.target["column"]].tolist() == expected.loc[features["Date"]].astype(int).tolist()
 
         # Read the splits.
-        splits = {name: DeltaIO().read(table = splitter.output[name]) for name in ("train", "val", "test")}
+        splits = {name: StorageIO().read(table = splitter.output[name]) for name in ("train", "val", "test")}
 
         # Check training ends before validation starts and validation ends before test starts.
         assert splits["train"]["Date"].max() < splits["val"]["Date"].min() and splits["val"]["Date"].max() < splits["test"]["Date"].min()
@@ -89,7 +89,7 @@ class TestPipelineIntegration:
         assert len(best.predict(splits = splits)["test"]["pred"]) == len(splits["test"])
 
         # Read the metrics table.
-        metrics = DeltaIO().read(table = training.output["tables"]["metrics"])
+        metrics = StorageIO().read(table = training.output["tables"]["metrics"], all_runs = True)
 
         # Check every configured model and split was scored and tagged with the run.
         assert set(training.models_config) <= set(metrics["model"]) and set(metrics["split"]) == {"train", "val", "test"} and (metrics["run_id"] == training.run_id).all()

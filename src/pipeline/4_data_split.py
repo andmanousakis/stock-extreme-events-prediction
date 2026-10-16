@@ -1,6 +1,6 @@
 import pandas as pd
 from utils.config_loader import ConfigLoader
-from utils.delta_io import DeltaIO
+from utils.storage_io import StorageIO
 from utils.error_handler import log_step
 from utils.logger import Logger
 
@@ -20,8 +20,8 @@ class DataSplit:
         # Load configs.
         self.config = ConfigLoader().load("config-split")
 
-        # Create the Delta table reader and writer.
-        self.delta = DeltaIO()
+        # Create the table storage.
+        self.storage = StorageIO()
 
         # Get the input configs.
         self.input = self.config["input"]
@@ -48,7 +48,7 @@ class DataSplit:
         """
 
         # Read the feature dataset table.
-        df = self.delta.read(table = path)
+        df = self.storage.read(table = path)
 
         # Make sure rows are in date order before splitting.
         df = df.sort_values("Date").reset_index(drop = True)
@@ -111,7 +111,7 @@ class DataSplit:
     @log_step("Store splits")
     def store_splits(self, splits: dict = None) -> dict:
         """
-        Store each split as its configured Delta table.
+        Store each split as its configured Parquet table.
 
         Args:
             splits (dict): 'train', 'val' and 'test' DataFrames.
@@ -123,8 +123,8 @@ class DataSplit:
         # Store each split.
         for name, df in splits.items():
 
-            # Write the split as a new version of its table.
-            self.delta.write(df = df, table = self.output[name])
+            # Write the split as this run's file of its table.
+            self.storage.write(df = df, table = self.output[name])
 
         # Return splits.
         return splits
