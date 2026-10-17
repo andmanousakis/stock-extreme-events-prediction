@@ -1,9 +1,8 @@
 name: CI/CD
 
-# Run on every push and on pull requests.
+# Run manually from the Actions tab; the chosen branch sets the environment.
 on:
-  push:
-  pull_request:
+  workflow_dispatch:
 
 # Allow jobs to read the code and push/pull images on GitHub Container Registry.
 permissions:
@@ -25,7 +24,7 @@ env:
   AWS_REGION: ${{ secrets.AWS_REGION }}
 
 jobs:
-  # CI: build the image and run the unit tests. Runs on every push and pull request.
+  # CI: build the image and run the unit tests.
   ci:
     runs-on: ubuntu-24.04
     steps:
@@ -52,10 +51,9 @@ jobs:
       - name: Run unit tests
         run: docker run --rm -e APP_ENV=${{ env.APP_ENV }} stock-extreme:${{ github.sha }} python -m pytest -v -p no:cacheprovider -m "not integration"
 
-  # CD: publish the image to GitHub Container Registry. Only for pushes, after CI passes.
+  # CD: publish the image to GitHub Container Registry, after CI passes.
   cd:
     needs: ci
-    if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     steps:
       # Get the repository code.
@@ -111,7 +109,7 @@ jobs:
     permissions:
       contents: write
       packages: read
-    # Pass the release tag to the preprocess job.
+    # Pass the release tag to the later jobs.
     outputs:
       tag: ${{ steps.release.outputs.tag }}
     steps:
@@ -123,13 +121,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Run data retrieval with the target environment's configs, writing data/ and logs/ to the runner through mounted folders.
+      # Run data retrieval with the target environment's configs and the storage credentials, writing tables to storage and logs/ to the runner.
       - name: Run data retrieval
         run: |
           mkdir -p data logs
           docker run --rm -e APP_ENV=${{ env.APP_ENV }} -e STORAGE_BUCKET -e AWS_ENDPOINT_URL -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_REGION -u $(id -u):$(id -g) -v "$PWD/data":/app/data -v "$PWD/logs":/app/logs ${{ env.IMAGE }}:${{ github.sha }} python -m src.pipeline.1_data_retrieval
 
-      # Create the run's release with the retrieval log, tagged tagged data-<environment>-<date>-<short sha>-r<run number>.<attempt>, unique per run and re-run.
+      # Create the run's release with the retrieval log, tagged data-<environment>-<date>-<short sha>-r<run number>.<attempt>, unique per run and re-run.
       - name: Create data release
         id: release
         env:
@@ -167,14 +165,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Run data preprocessing with the target environment's configs, writing data/ and logs/ to the runner through mounted folders.
+      # Run data preprocessing with the target environment's configs and the storage credentials, writing tables to storage and logs/ to the runner.
       - name: Run data preprocessing
         run: |
           mkdir -p logs
           docker run --rm -e APP_ENV=${{ env.APP_ENV }} -e STORAGE_BUCKET -e AWS_ENDPOINT_URL -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_REGION -u $(id -u):$(id -g) -v "$PWD/data":/app/data -v "$PWD/logs":/app/logs ${{ env.IMAGE }}:${{ github.sha }} python -m src.pipeline.2_data_preprocessing
 
-      # Add the clean data and preprocessing log to the release.
-      - name: Upload clean data
+      # Add the preprocessing log to the release.
+      - name: Upload preprocessing log
         run: |
           cp logs/pipeline.log logs/preprocessing.log
           gh release upload "$TAG" logs/preprocessing.log --repo "${{ github.repository }}"
@@ -200,14 +198,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Run feature engineering with the target environment's configs, writing data/ and logs/ to the runner through mounted folders.
+      # Run feature engineering with the target environment's configs and the storage credentials, writing tables to storage and logs/ to the runner.
       - name: Run feature engineering
         run: |
           mkdir -p logs
           docker run --rm -e APP_ENV=${{ env.APP_ENV }} -e STORAGE_BUCKET -e AWS_ENDPOINT_URL -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_REGION -u $(id -u):$(id -g) -v "$PWD/data":/app/data -v "$PWD/logs":/app/logs ${{ env.IMAGE }}:${{ github.sha }} python -m src.pipeline.3_feature_engineering
 
-      # Add the feature dataset and feature engineering log to the release.
-      - name: Upload features
+      # Add the feature engineering log to the release.
+      - name: Upload features log
         run: |
           cp logs/pipeline.log logs/features.log
           gh release upload "$TAG" logs/features.log --repo "${{ github.repository }}"
@@ -233,19 +231,19 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Run the data split with the target environment's configs, writing data/ and logs/ to the runner through mounted folders.
+      # Run the data split with the target environment's configs and the storage credentials, writing tables to storage and logs/ to the runner.
       - name: Run data split
         run: |
           mkdir -p logs
           docker run --rm -e APP_ENV=${{ env.APP_ENV }} -e STORAGE_BUCKET -e AWS_ENDPOINT_URL -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_REGION -u $(id -u):$(id -g) -v "$PWD/data":/app/data -v "$PWD/logs":/app/logs ${{ env.IMAGE }}:${{ github.sha }} python -m src.pipeline.4_data_split
 
-      # Add the train, val and test sets and the split log to the release.
-      - name: Upload splits
+      # Add the split log to the release.
+      - name: Upload split log
         run: |
           cp logs/pipeline.log logs/split.log
           gh release upload "$TAG" logs/split.log --repo "${{ github.repository }}"
 
-  # Training and evaluation: train every configured model on the splits from the release, score it on train, val and test,
+  # Training and evaluation: train every configured model on the split tables, score it on train, val and test,
   # log it to MLflow, write its metrics and predictions tables, and add the models to the same release.
   training-evaluation:
     needs: [retrieve, split]

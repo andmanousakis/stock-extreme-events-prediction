@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stock-extreme"
-version = "0.1.0"
+version = "0.3.0"
 description = "Predict extreme daily moves in Apple stock with a temporal CNN."
 requires-python = ">=3.11"
 dependencies = [
