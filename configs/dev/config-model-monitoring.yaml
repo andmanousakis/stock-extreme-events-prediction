@@ -1,0 +1,16 @@
+input:
+  train: processed/train
+  val: processed/val
+  test: processed/test
+  metrics_table: evaluation/metrics
+
+comparison:
+  metric: mcc
+  split: val
+
+tracking:
+  registered_model: stock-extreme-model
+
+output:
+  tables:
+    monitoring: evaluation/monitoring

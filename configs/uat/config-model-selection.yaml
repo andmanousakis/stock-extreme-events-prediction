@@ -6,7 +6,6 @@ selection_metric: mcc
 
 tracking:
   registered_model: stock-extreme-model
-  promote_only_if_better: true
 
 output:
   best_model: models/best_model.joblib

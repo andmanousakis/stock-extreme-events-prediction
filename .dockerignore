@@ -8,5 +8,6 @@ logs
 models
 reports
 docs
+private
 *.zip
 .env

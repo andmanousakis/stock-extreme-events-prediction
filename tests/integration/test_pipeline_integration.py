@@ -10,6 +10,7 @@ feature_engineering = importlib.import_module("src.pipeline.3_feature_engineerin
 data_split = importlib.import_module("src.pipeline.4_data_split")
 model_training_evaluation = importlib.import_module("src.pipeline.5_model_training_evaluation")
 model_selection = importlib.import_module("src.pipeline.6_model_selection")
+model_monitoring = importlib.import_module("src.pipeline.7_model_monitoring")
 
 @pytest.mark.integration
 class TestPipelineIntegration:
@@ -33,6 +34,7 @@ class TestPipelineIntegration:
         splitter = data_split.DataSplit()
         training = model_training_evaluation.ModelTrainingEvaluation()
         selection = model_selection.ModelSelection()
+        monitoring = model_monitoring.ModelMonitoring()
 
         # Check preprocessing reads the file retrieval writes.
         assert preprocessing.input["raw_data"] == retrieval.output["raw_data"]
@@ -49,11 +51,14 @@ class TestPipelineIntegration:
         # Check selection reads the metrics table and models training writes.
         assert selection.input["metrics_table"] == training.output["tables"]["metrics"] and selection.input["models_dir"] == training.output["models_dir"]
 
+        # Check monitoring reads the splits and metrics table training writes, and the model selection registers.
+        assert all(monitoring.input[name] == training.input[name] for name in ("train", "val", "test")) and monitoring.input["metrics_table"] == training.output["tables"]["metrics"] and monitoring.tracker.registered_model == selection.tracker.registered_model
+
         # Check every step uses the same target column.
         assert preprocessing.target["column"] == engineering.target["column"] == splitter.target["column"] == training.target["column"]
 
         # Run every step in order.
-        for step in (retrieval, preprocessing, engineering, splitter, training, selection):
+        for step in (retrieval, preprocessing, engineering, splitter, training, selection, monitoring):
 
             # Run the step.
             step.pipeline()

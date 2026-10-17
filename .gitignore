@@ -13,7 +13,7 @@ models/*.joblib
 reports/
 
 # Local reference material
-docs/
+private/
 *.zip
 __MACOSX/
 

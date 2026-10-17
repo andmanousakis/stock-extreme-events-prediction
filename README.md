@@ -2,6 +2,12 @@
 
 Binary classifier for extreme daily moves in Apple (AAPL) stock, defined as days where the absolute daily return exceeds 2%. Daily prices are downloaded from Yahoo Finance (from 1990 to the latest trading day; 2005 onwards in dev), validated against a schema, cleaned, labelled and split chronologically, then used to train models.
 
+## Documentation
+
+- [Modelling](docs/modelling.md): data, features, split, model, metrics and selection.
+- [Deployment](docs/deployment.md): environments, CI/CD, Docker, storage, MLflow and secrets.
+- [Changelog](CHANGELOG.md)
+
 ## Local DEV
 
 **Show all commands:**
@@ -9,7 +15,7 @@ Binary classifier for extreme daily moves in Apple (AAPL) stock, defined as days
 make help
 ```
 
-**Build image, run tests and run the pipeline (retrieval, preprocessing, feature engineering, data split, training and evaluation, model selection):**
+**Build image, run tests and run the pipeline (retrieval, preprocessing, feature engineering, data split, training and evaluation, model selection, model monitoring):**
 ```bash
 make stock-extreme-dev-build-up
 ```
@@ -43,23 +49,24 @@ make stock-extreme-dev-clean-docker
 make stock-extreme-dev-wipe-docker
 ```
 
-## CI/CD
+## Deployment - CI/CD
 
-GitHub Actions ([`.github/workflows/cicd.yml`](.github/workflows/cicd.yml)) runs nine jobs in sequence; each runs only if the previous one succeeded:
+GitHub Actions ([`.github/workflows/cicd.yml`](.github/workflows/cicd.yml)) runs manually: open **Actions → CI/CD → Run workflow** and pick the branch. It runs ten jobs in sequence; each runs only if the previous one succeeded:
 
 ```
-ci > cd > integration > retrieve > preprocess > features > split > training-evaluation > model-selection
+ci > cd > integration > retrieve > preprocess > features > split > training-evaluation > model-selection > model-monitoring
 ```
 
-1. **ci** — builds the image and runs the unit tests. Runs on every push and pull request.
-2. **cd** — publishes the image to GitHub Container Registry as `ghcr.io/andmanousakis/stock-extreme:<environment>` and `:<commit>`. Runs on pushes only.
+1. **ci** — builds the image and runs the unit tests.
+2. **cd** — publishes the image to GitHub Container Registry as `ghcr.io/andmanousakis/stock-extreme:<environment>` and `:<commit>`.
 3. **integration** — pulls the published image and runs the integration tests against Yahoo Finance.
 4. **retrieve** — downloads AAPL prices, checks them against the schema, writes the raw Parquet table on DagsHub storage, and creates a `data-<environment>-<date>-<commit>-r<run>.<attempt>` release for the run's logs and models.
 5. **preprocess** — reads the raw table, cleans it, calculates daily returns, labels next-day extreme events, and writes the clean table.
 6. **features** — reads the clean table, adds volatility, range, gap and volume-ratio features, and writes the feature table.
 7. **split** — reads the feature table and splits it in time order (70% train, 15% val, 15% test) into three tables.
 8. **training-evaluation** — reads the three tables, trains every model in the config, scores it on train, val and test (F1, precision, recall, MCC, ROC AUC, accuracy), logs it to MLflow, writes its metrics and predictions tables (tagged with the run ID and date), shows the test results on the run page, and adds the models to the release.
-9. **model-selection** — reads this run's metrics from the metrics table, picks the best model by validation F1, registers it in MLflow with the environment's alias, and adds it to the same release.
+9. **model-selection** — reads this run's metrics from the metrics table, picks the best model by validation MCC, registers it in MLflow as a new version, and adds it to the same release.
+10. **model-monitoring** — scores the deployed model and the newly registered one on this run's val and test tables, moves the environment's alias to the new model if its validation MCC is higher, writes the comparison to the monitoring table, and shows it on the run page.
 
 GitHub Actions builds from [`docker/deploy/Dockerfile`](docker/deploy/Dockerfile). [`docker/local/`](docker/local/) and the makefile are for local development only.
 

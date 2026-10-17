@@ -44,6 +44,6 @@ COPY configs ./configs
 COPY schemas ./schemas
 COPY tests ./tests
 
-# Run the pipeline by default: data retrieval, preprocessing, feature engineering, the data split, model training and evaluation, then model selection.
-CMD ["sh", "-c", "python -m src.pipeline.1_data_retrieval && python -m src.pipeline.2_data_preprocessing && python -m src.pipeline.3_feature_engineering && python -m src.pipeline.4_data_split && python -m src.pipeline.5_model_training_evaluation && python -m src.pipeline.6_model_selection"]
+# Run the pipeline by default: data retrieval, preprocessing, feature engineering, the data split, model training and evaluation, model selection, then model monitoring.
+CMD ["sh", "-c", "python -m src.pipeline.1_data_retrieval && python -m src.pipeline.2_data_preprocessing && python -m src.pipeline.3_feature_engineering && python -m src.pipeline.4_data_split && python -m src.pipeline.5_model_training_evaluation && python -m src.pipeline.6_model_selection && python -m src.pipeline.7_model_monitoring"]
 
