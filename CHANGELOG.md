@@ -14,7 +14,8 @@ First release promoted to `uat`.
 ### Added
 - Model classes in `src/models/`: `TemporalCNNModel` with the network chosen from config (`src/models/networks/`).
 - Training and evaluation step: scores every model on train, val and test with F1, precision, recall, MCC, ROC AUC and accuracy, and writes metrics and predictions tables tagged with `run_id` and `run_date`.
-- Model selection step: picks the best model of the latest run by validation MCC; test is reported only.
+- Model selection step: picks the best model of the latest run by validation MCC and registers it; test is reported only.
+- Model monitoring step: scores the deployed and newly registered versions on the same data and moves the environment's alias only if the new version's validation MCC is higher; results go to the `evaluation/monitoring` table and the run page.
 - MLflow tracking and model registry on DagsHub (`src/mlops/`): one run per model with settings, metrics, training curves, confusion matrices, ROC and precision-recall curves; best model registered as `stock-extreme-model` with an alias per environment.
 - Parquet table storage on DagsHub (`utils/storage_io.py`), one file per table and run, so history is kept.
 - Class weights, weight decay and validation-tuned decision threshold for the temporal CNN.
@@ -24,7 +25,7 @@ First release promoted to `uat`.
 ### Changed
 - Pipeline steps moved to `src/pipeline/`.
 - Daily returns, extreme-event labels and the next-day target are now built in data preprocessing.
-- Threshold tuning, model selection and registry promotion use validation MCC instead of F1.
+- Threshold tuning, model selection and model monitoring use validation MCC instead of F1.
 - Date range extended to 1990 onwards (2005 onwards in dev), up to the latest trading day.
 - CI/CD runs training-evaluation and model-selection as separate jobs; releases hold logs and models only.
 - CI/CD runs manually (`workflow_dispatch`) instead of on every push and pull request.

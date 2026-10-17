@@ -20,5 +20,5 @@ services:
     volumes:
       # Share the project folder so code changes and outputs sync with your machine.
       - ../..:/app
-    # Run the unit and integration tests, then data retrieval, preprocessing, feature engineering, the data split, model training and evaluation, and model selection, each only if the previous step passed (no .pytest_cache in the project).
-    command: sh -c "python -m pytest -v -p no:cacheprovider && python -m src.pipeline.1_data_retrieval && python -m src.pipeline.2_data_preprocessing && python -m src.pipeline.3_feature_engineering && python -m src.pipeline.4_data_split && python -m src.pipeline.5_model_training_evaluation && python -m src.pipeline.6_model_selection"
+    # Run the unit and integration tests, then data retrieval, preprocessing, feature engineering, the data split, model training and evaluation, model selection and model monitoring, each only if the previous step passed (no .pytest_cache in the project).
+    command: sh -c "python -m pytest -v -p no:cacheprovider && python -m src.pipeline.1_data_retrieval && python -m src.pipeline.2_data_preprocessing && python -m src.pipeline.3_feature_engineering && python -m src.pipeline.4_data_split && python -m src.pipeline.5_model_training_evaluation && python -m src.pipeline.6_model_selection && python -m src.pipeline.7_model_monitoring"

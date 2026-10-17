@@ -10,21 +10,20 @@ from src.mlops.mlflow_model import MlflowModel
 
 class MlflowTracker:
     """
-    Log model runs to MLflow and register the best model with an alias per environment.
+    Log model runs to MLflow, register models, load registered versions and move the environment's alias.
     Only active when MLFLOW_TRACKING_URI is set.
     """
 
     # Metrics logged for every split.
     METRICS = ("accuracy", "precision", "recall", "f1", "roc_auc", "mcc")
 
-    def __init__(self, experiment: str = None, registered_model: str = None, promote_only_if_better: bool = False):
+    def __init__(self, experiment: str = None, registered_model: str = None):
         """
         Store the tracking settings and read the environment.
 
         Args:
             experiment (str): MLflow experiment name.
             registered_model (str): Registered model name in the Model Registry.
-            promote_only_if_better (bool): Move the environment's alias only if the new version has a higher val F1.
         """
 
         # Store the experiment name.
@@ -32,9 +31,6 @@ class MlflowTracker:
 
         # Store the registered model name.
         self.registered_model = registered_model
-
-        # Store the promotion rule.
-        self.promote_only_if_better = promote_only_if_better
 
         # Track only when a tracking server is configured.
         self.enabled = bool(os.environ.get("MLFLOW_TRACKING_URI"))
@@ -155,23 +151,20 @@ class MlflowTracker:
             # Free the figure.
             plt.close(figure)
 
-    def register_best(self, best: str = None, model_uri: str = None, table: pd.DataFrame = None, metric: str = "f1") -> dict:
+    def register(self, best: str = None, model_uri: str = None, table: pd.DataFrame = None, metric: str = "mcc") -> str:
         """
-        Register the best model as a new version, tag it, and point the environment's alias at it.
-        With promote_only_if_better, the alias only moves if the new version's val score beats the version it points at.
+        Register the best model of the run as a new version and tag it with what it is and how it scored.
+        The environment's alias is not moved here; model monitoring decides that.
 
         Args:
             best (str): Name of the best model.
             model_uri (str): The best model's logged model URI.
             table (pd.DataFrame): One row per model and split with the metrics.
-            metric (str): Metric used to compare versions, e.g. 'mcc'.
+            metric (str): Metric the model was selected by, e.g. 'mcc'.
 
         Returns:
-            dict: The registered 'version' and whether the alias was 'promoted'.
+            str: The registered version.
         """
-
-        # Create the registry client.
-        client = MlflowClient()
 
         # Get the best model's score per split.
         score = table[table["model"] == best].set_index("split")[metric]
@@ -180,36 +173,86 @@ class MlflowTracker:
         version = mlflow.register_model(model_uri = model_uri, name = self.registered_model).version
 
         # Tag the version with what it is and how it scored.
-        for key, value in {"environment": self.env, "model": best, "metric": metric, f"val_{metric}": f"{score['val']:.6f}", f"test_{metric}": f"{score['test']:.6f}"}.items():
+        self.tag(version = version, tags = {"environment": self.env, "run_id": table["run_id"].iloc[0], "model": best, "metric": metric, f"val_{metric}": f"{score['val']:.6f}", f"test_{metric}": f"{score['test']:.6f}"})
+
+        # Return the version.
+        return version
+
+    def run_version(self, run_id: str = None) -> str:
+        """
+        Get the version registered by a pipeline run in this environment.
+
+        Args:
+            run_id (str): Pipeline run ID the version was tagged with.
+
+        Returns:
+            str: The run's version, or None if the run registered none.
+        """
+
+        # Find the versions registered by the run in this environment.
+        versions = MlflowClient().search_model_versions(f"name = '{self.registered_model}' and tag.environment = '{self.env}' and tag.run_id = '{run_id}'")
+
+        # Return the highest version number, if any.
+        return str(max(int(v.version) for v in versions)) if versions else None
+
+    def deployed_version(self) -> str:
+        """
+        Get the version the environment's alias points at.
+
+        Returns:
+            str: The deployed version, or None if the alias is not set yet.
+        """
+
+        # Read the version behind the alias.
+        try:
+
+            # Return its version.
+            return MlflowClient().get_model_version_by_alias(self.registered_model, self.env).version
+
+        except mlflow.exceptions.MlflowException:
+
+            # No version deployed yet.
+            return None
+
+    def load(self, version: str = None):
+        """
+        Load a registered version and unwrap it to the project's model class, so it can predict on the pipeline splits.
+
+        Args:
+            version (str): Registered version to load.
+
+        Returns:
+            TemporalCNNModel: The trained model.
+        """
+
+        # Load the version and return the model inside the MLflow wrapper.
+        return mlflow.pyfunc.load_model(f"models:/{self.registered_model}/{version}").unwrap_python_model().model
+
+    def tag(self, version: str = None, tags: dict = None):
+        """
+        Set tags on a registered version.
+
+        Args:
+            version (str): Registered version.
+            tags (dict): Tag names and values.
+        """
+
+        # Create the registry client.
+        client = MlflowClient()
+
+        # Set each tag.
+        for key, value in tags.items():
 
             # Set the tag.
-            client.set_model_version_tag(self.registered_model, version, key, value)
+            client.set_model_version_tag(self.registered_model, version, key, str(value))
 
-        # Start by moving the alias.
-        promote = True
+    def promote(self, version: str = None):
+        """
+        Point the environment's alias at a version.
 
-        # Compare with the current version if only better models may be promoted.
-        if self.promote_only_if_better:
+        Args:
+            version (str): Registered version to deploy.
+        """
 
-            # Read the val score of the version the alias points at.
-            try:
-
-                # Get the current version's val score on the same metric.
-                current = float(client.get_model_version_by_alias(self.registered_model, self.env).tags.get(f"val_{metric}", "-1"))
-
-            except mlflow.exceptions.MlflowException:
-
-                # No current version yet.
-                current = -1.0
-
-            # Move the alias only if the new version is better.
-            promote = score["val"] > current
-
-        # Point the environment's alias at the new version if it should move.
-        if promote:
-
-            # Set the alias.
-            client.set_registered_model_alias(self.registered_model, self.env, version)
-
-        # Return the outcome.
-        return {"version": version, "promoted": promote}
+        # Set the alias.
+        MlflowClient().set_registered_model_alias(self.registered_model, self.env, version)

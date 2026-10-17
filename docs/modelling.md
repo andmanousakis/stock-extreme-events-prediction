@@ -56,12 +56,18 @@ sequenceDiagram
     Note over P,F: Model selection
     S-->>P: read evaluation/metrics (latest run)
     P->>P: pick best model by val MCC
-    P->>F: register stock-extreme-model
-    alt dev, or val MCC beats the current alias
+    P->>F: register stock-extreme-model as a new version
+
+    Note over P,F: Model monitoring
+    F-->>P: load the new version and the deployed version (alias)
+    S-->>P: read train, val, test
+    P->>P: score both on the same val and test
+    alt nothing deployed, or new val MCC is higher
         P->>F: move the environment alias to the new version
     else
-        P->>F: keep the current alias
+        P->>F: keep the deployed version
     end
+    P->>S: write evaluation/monitoring
 ```
 
 ## Data
@@ -156,13 +162,23 @@ The metrics and every prediction are written to the `evaluation/metrics` and `ev
 
 ### Why MCC
 
-On imbalanced data, F1 can be pushed up by predicting every day as extreme: recall becomes 100% and precision equals the base rate. An earlier version did exactly that. MCC is 0 for any constant prediction, so a model only scores well if it really tells the two classes apart. MCC is therefore used for threshold tuning, model selection and registry promotion.
+On imbalanced data, F1 can be pushed up by predicting every day as extreme: recall becomes 100% and precision equals the base rate. An earlier version did exactly that. MCC is 0 for any constant prediction, so a model only scores well if it really tells the two classes apart. MCC is therefore used for threshold tuning, model selection and model monitoring.
 
 ## Selection
 
-[`src/pipeline/6_model_selection.py`](../src/pipeline/6_model_selection.py) reads the metrics of the latest run and picks the model with the highest val MCC. It saves that model as `models/best_model.joblib` and registers it in MLflow as `stock-extreme-model`, with the environment (`dev`, `uat` or `prod`) as its alias.
+[`src/pipeline/6_model_selection.py`](../src/pipeline/6_model_selection.py) reads the metrics of the latest run and picks the model with the highest val MCC. It saves that model as `models/best_model.joblib` and registers it in MLflow as a new version of `stock-extreme-model`. Selection only compares the models of the current run.
 
-In dev the alias always moves to the new model. In uat and prod it moves only if the new model's val MCC beats the current one.
+## Monitoring
+
+[`src/pipeline/7_model_monitoring.py`](../src/pipeline/7_model_monitoring.py) decides whether the new version replaces the one deployed in the environment, which the environment's alias (`dev`, `uat` or `prod`) points at.
+
+Comparing the val MCC each version had when it was trained isn't fair: every run downloads more days, so the val period moves forward and one period can simply be harder to predict than another. Monitoring therefore loads both versions from the registry and scores them on the **same** val and test data from the current run.
+
+The alias moves to the new version when nothing is deployed yet, or when its val MCC on the current data is strictly higher than the deployed version's. The rule is the same in dev, uat and prod.
+
+Test MCC is reported but never decides. If the deployed version can't predict on the current data, for example after a feature change, it is left out and the new version is deployed.
+
+The comparison is written to the `evaluation/monitoring` table (one row per version and split, with the run ID and whether it was promoted), and the new version is tagged with the version it was compared against, that version's val MCC and the outcome.
 
 ## Limitations
 

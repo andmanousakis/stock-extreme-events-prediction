@@ -59,8 +59,16 @@ sequenceDiagram
     Note over G,F: model-selection
     L-->>G: download models
     S-->>G: read evaluation/metrics
-    G->>F: register best model, move alias if allowed
+    G->>F: register best model as a new version
     G->>L: upload best_model.joblib and log
+
+    Note over G,F: model-monitoring
+    F-->>G: load new and deployed versions
+    S-->>G: read train, val, test
+    G->>F: move alias if the new version is better
+    G->>S: write evaluation/monitoring
+    G->>L: upload log
+    G-->>D: deployed vs new model on the run page
 ```
 
 ## Environments
@@ -80,16 +88,15 @@ The configs differ only in these settings:
 | Data from | 2005-01-01 | 1990-01-01 | 1990-01-01 |
 | Download retries | 3 | 5 | 5 |
 | Log level | DEBUG | INFO | INFO |
-| Registry alias | always moves | moves only if val MCC is better | moves only if val MCC is better |
 
 Changes are promoted through pull requests: `dev` → `uat` → `prod`. Pushes and pull requests don't start the workflow. To run the pipeline in an environment, open **Actions → CI/CD → Run workflow** on GitHub and pick that branch.
 
 ## CI/CD
 
-The workflow has nine jobs that run in sequence. Each job runs only if the previous one succeeded.
+The workflow has ten jobs that run in sequence. Each job runs only if the previous one succeeded.
 
 ```
-ci > cd > integration > retrieve > preprocess > features > split > training-evaluation > model-selection
+ci > cd > integration > retrieve > preprocess > features > split > training-evaluation > model-selection > model-monitoring
 ```
 
 | Job | What it does |
@@ -102,7 +109,8 @@ ci > cd > integration > retrieve > preprocess > features > split > training-eval
 | `features` | Writes the feature table |
 | `split` | Writes the train, val and test tables |
 | `training-evaluation` | Trains and scores the models, logs them to MLflow, writes the evaluation tables and adds the test metrics to the run page |
-| `model-selection` | Picks and registers the best model |
+| `model-selection` | Picks the best model of the run and registers it as a new version |
+| `model-monitoring` | Scores the deployed and new versions on the same data, moves the alias if the new one is better, writes the monitoring table and adds the comparison to the run page |
 
 Every job after `cd` runs the same image, `:<commit>`, so all steps use exactly the code that passed `ci`. Docker layers are cached between jobs and runs with the GitHub Actions cache.
 
@@ -127,7 +135,7 @@ Both images use Python 3.11, CPU-only PyTorch and dependencies pinned in [`pypro
 ```
 
 - Every run adds a new file instead of overwriting, so the history of each table is kept.
-- By default a read returns the latest file. It can also return a given run, or all runs together, which model selection uses to read the metrics.
+- By default a read returns the latest file. It can also return a given run, or all runs together, which model selection and monitoring use to read the metrics.
 - If `STORAGE_BUCKET` is not set, the same layout is written under the local `data/` folder. The unit tests run this way.
 
 Tables:
@@ -139,13 +147,14 @@ Tables:
 | `processed/apple_stock_features` | feature engineering |
 | `processed/train`, `processed/val`, `processed/test` | split |
 | `evaluation/metrics`, `evaluation/predictions` | training and evaluation |
+| `evaluation/monitoring` | model monitoring |
 
 ## MLflow
 
 Tracking is on only when `MLFLOW_TRACKING_URI` is set. Without it, the pipeline runs the same way but logs nothing to MLflow.
 
 - **Experiment `stock-extreme`.** One run per model, with its settings, metrics for each split, training curves, plots and the model itself as a pyfunc model.
-- **Registered model `stock-extreme-model`.** Every pipeline run registers its best model as a new version, tagged with its val and test scores. The `dev`, `uat` and `prod` aliases point at the version that environment currently serves. To load it:
+- **Registered model `stock-extreme-model`.** Every pipeline run registers its best model as a new version, tagged with its run ID and its val and test scores. The `dev`, `uat` and `prod` aliases point at the version that environment currently serves; only model monitoring moves them. To load it:
 
 ```python
 import mlflow

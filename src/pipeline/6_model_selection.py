@@ -10,7 +10,7 @@ from utils.logger import Logger
 class ModelSelection:
     """
     Pick the best model of the latest pipeline run by its validation score, save it as the best model,
-    and register it in MLflow with the environment's alias. Test is only reported, never used to choose.
+    and register it in MLflow as a new version. Test is only reported, never used to choose.
     """
 
     def __init__(self):
@@ -106,16 +106,17 @@ class ModelSelection:
         return self.output["best_model"]
 
     @log_step("MLflow registration")
-    def register(self, best: str = None, metrics: pd.DataFrame = None) -> dict:
+    def register(self, best: str = None, metrics: pd.DataFrame = None) -> str:
         """
-        Register the best model and move the environment's alias. Skipped when it was not logged to MLflow.
+        Register the best model as a new version. Skipped when it was not logged to MLflow.
+        The environment's alias is moved by model monitoring, not here.
 
         Args:
             best (str): Name of the best model.
             metrics (pd.DataFrame): The latest run's metrics, with each model's 'model_uri'.
 
         Returns:
-            dict: The registered version and whether the alias moved, empty when skipped.
+            str: The registered version, None when skipped.
         """
 
         # Get the best model's logged model URI.
@@ -128,16 +129,16 @@ class ModelSelection:
             self.logger.info("No MLflow tracking server or logged model, registration skipped.")
 
             # Return nothing registered.
-            return {}
+            return None
 
         # Register the best model.
-        result = self.tracker.register_best(best = best, model_uri = model_uri, table = metrics, metric = self.selection_metric)
+        version = self.tracker.register(best = best, model_uri = model_uri, table = metrics, metric = self.selection_metric)
 
         # Log the outcome.
-        self.logger.info(f"Registered {self.tracker.registered_model} version {result['version']} ({best}); alias '{self.tracker.env}' {'moved to it' if result['promoted'] else 'kept on the better existing version'}.")
+        self.logger.info(f"Registered {self.tracker.registered_model} version {version} ({best}).")
 
-        # Return the outcome.
-        return result
+        # Return the version.
+        return version
 
     def pipeline(self):
         """
